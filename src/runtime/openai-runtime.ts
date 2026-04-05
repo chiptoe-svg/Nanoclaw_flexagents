@@ -47,10 +47,7 @@ export class OpenAIRuntime implements AgentRuntime {
 
     const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
 
-    const envSecrets = readEnvFile([
-      'OPENAI_API_KEY',
-      'OPENAI_BASE_URL',
-    ]);
+    const envSecrets = readEnvFile(['OPENAI_API_KEY', 'OPENAI_BASE_URL']);
     const client = new OpenAI({
       apiKey: envSecrets.OPENAI_API_KEY || undefined,
       baseURL: envSecrets.OPENAI_BASE_URL || undefined,
@@ -242,9 +239,7 @@ export class OpenAIRuntime implements AgentRuntime {
 
 // --- Helpers ---
 
-function toOpenAITool(
-  def: ToolDefinition,
-): OpenAI.ChatCompletionTool {
+function toOpenAITool(def: ToolDefinition): OpenAI.ChatCompletionTool {
   return {
     type: 'function',
     function: {
@@ -255,13 +250,79 @@ function toOpenAITool(
   };
 }
 
+/**
+ * Read group persona/instructions. Checks AGENT.md first (runtime-agnostic),
+ * falls back to CLAUDE.md (backward compatible).
+ */
+function readGroupInstructions(groupFolder: string): string | null {
+  const groupDir = path.join(GROUPS_DIR, groupFolder);
+  for (const filename of ['AGENT.md', 'CLAUDE.md']) {
+    const filePath = path.join(groupDir, filename);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+  }
+  return null;
+}
+
+/**
+ * Read global instructions from the global memory directory.
+ */
+function readGlobalInstructions(): string | null {
+  const globalDir = path.join(GROUPS_DIR, 'global');
+  for (const filename of ['AGENT.md', 'CLAUDE.md']) {
+    const filePath = path.join(globalDir, filename);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+  }
+  return null;
+}
+
+/**
+ * Build a skill index from container/skills/ directories.
+ * Returns a short summary for the system prompt.
+ */
+function buildSkillIndex(): string {
+  const skillsDir = path.join(process.cwd(), 'container', 'skills');
+  if (!fs.existsSync(skillsDir)) return '';
+
+  const skills: Array<{ name: string; description: string }> = [];
+  for (const entry of fs.readdirSync(skillsDir)) {
+    const skillMd = path.join(skillsDir, entry, 'SKILL.md');
+    if (!fs.existsSync(skillMd)) continue;
+    const content = fs.readFileSync(skillMd, 'utf-8');
+    // Parse frontmatter
+    const match = content.match(
+      /^---\s*\n([\s\S]*?)\n---/,
+    );
+    if (!match) continue;
+    const frontmatter = match[1];
+    const name =
+      frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() || entry;
+    const description =
+      frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
+    if (name && description) {
+      skills.push({ name, description });
+    }
+  }
+
+  if (skills.length === 0) return '';
+
+  const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
+  return (
+    '\nAvailable skills (use load_skill tool to get full instructions):\n' +
+    lines.join('\n')
+  );
+}
+
 function buildSystemPrompt(config: AgentRuntimeConfig): string {
   const parts: string[] = [];
 
+  parts.push(`You are ${config.assistantName}, a helpful AI assistant.`);
   parts.push(
-    `You are ${config.assistantName}, a helpful AI assistant.`,
+    'You have access to tools for file operations, shell commands, web search, and messaging.',
   );
-  parts.push('You have access to tools for file operations, shell commands, web search, and messaging.');
   parts.push('Use tools when needed to help the user. Be concise and helpful.');
 
   if (config.isMain) {
@@ -271,22 +332,27 @@ function buildSystemPrompt(config: AgentRuntimeConfig): string {
   }
 
   if (config.isScheduledTask) {
-    parts.push(
-      'This is an automated scheduled task, not a live conversation.',
-    );
+    parts.push('This is an automated scheduled task, not a live conversation.');
   }
 
-  // Load group instructions if they exist
-  try {
-    const groupDir = path.join(GROUPS_DIR, config.group.folder);
-    const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
-    if (fs.existsSync(claudeMdPath)) {
-      const instructions = fs.readFileSync(claudeMdPath, 'utf-8');
-      parts.push('\n--- Group Instructions ---\n');
-      parts.push(instructions);
-    }
-  } catch {
-    // ignore missing instructions
+  // Load global instructions
+  const globalInstructions = readGlobalInstructions();
+  if (globalInstructions) {
+    parts.push('\n--- Global Instructions ---\n');
+    parts.push(globalInstructions);
+  }
+
+  // Load group-specific persona/instructions
+  const groupInstructions = readGroupInstructions(config.group.folder);
+  if (groupInstructions) {
+    parts.push('\n--- Group Instructions ---\n');
+    parts.push(groupInstructions);
+  }
+
+  // Skill index (lightweight — just names + descriptions)
+  const skillIndex = buildSkillIndex();
+  if (skillIndex) {
+    parts.push(skillIndex);
   }
 
   return parts.join('\n');

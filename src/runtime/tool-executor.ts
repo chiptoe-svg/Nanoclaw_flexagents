@@ -49,6 +49,8 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   cancel_task: 'host_only',
   update_task: 'host_only',
   register_group: 'host_only',
+  list_skills: 'host_only',
+  load_skill: 'host_only',
   web_search: 'either',
   web_fetch: 'either',
 };
@@ -186,6 +188,29 @@ const HOST_TOOL_DEFINITIONS: ToolDefinition[] = [
         requiresTrigger: { type: 'boolean' },
       },
       required: ['jid', 'name', 'folder', 'trigger'],
+    },
+    execution: 'host',
+  },
+  {
+    name: 'list_skills',
+    description:
+      'List all available skills with their names and descriptions.',
+    parameters: { type: 'object', properties: {} },
+    execution: 'host',
+  },
+  {
+    name: 'load_skill',
+    description:
+      'Load a skill by name. Returns the full instructions and a list of included files (templates, examples). Use this when you need detailed instructions for a specific capability.',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_name: {
+          type: 'string',
+          description: 'Name of the skill to load',
+        },
+      },
+      required: ['skill_name'],
     },
     execution: 'host',
   },
@@ -486,6 +511,35 @@ export class DefaultToolExecutor implements IToolExecutor {
         };
       }
 
+      case 'list_skills': {
+        const skills = this.listSkills();
+        if (skills.length === 0) {
+          return { content: 'No skills installed.' };
+        }
+        const formatted = skills
+          .map((s) => `- ${s.name}: ${s.description}`)
+          .join('\n');
+        return { content: `Available skills:\n${formatted}` };
+      }
+
+      case 'load_skill': {
+        const skillName = args.skill_name as string;
+        const result = this.loadSkill(skillName);
+        if (!result) {
+          return {
+            content: `Skill not found: ${skillName}`,
+            isError: true,
+          };
+        }
+        let content = result.instructions;
+        if (result.files.length > 0) {
+          content +=
+            '\n\n--- Included files (use read tool to access) ---\n' +
+            result.files.map((f) => `- ${f}`).join('\n');
+        }
+        return { content };
+      }
+
       case 'web_search':
         // TODO: Implement host-side web search (fetch + parse)
         return {
@@ -503,5 +557,73 @@ export class DefaultToolExecutor implements IToolExecutor {
       default:
         return { content: `Host tool not implemented: ${name}`, isError: true };
     }
+  }
+
+  // --- Skill discovery ---
+
+  private getSkillsDir(): string {
+    return path.join(process.cwd(), 'container', 'skills');
+  }
+
+  private listSkills(): Array<{ name: string; description: string }> {
+    const skillsDir = this.getSkillsDir();
+    if (!fs.existsSync(skillsDir)) return [];
+
+    const skills: Array<{ name: string; description: string }> = [];
+    for (const entry of fs.readdirSync(skillsDir)) {
+      const skillMd = path.join(skillsDir, entry, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+      const content = fs.readFileSync(skillMd, 'utf-8');
+      const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+      if (!match) continue;
+      const frontmatter = match[1];
+      const name =
+        frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() || entry;
+      const description =
+        frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
+      if (name) {
+        skills.push({ name, description });
+      }
+    }
+    return skills;
+  }
+
+  private loadSkill(
+    skillName: string,
+  ): { instructions: string; files: string[] } | null {
+    const skillsDir = this.getSkillsDir();
+
+    // Find the skill directory (match by folder name or frontmatter name)
+    for (const entry of fs.readdirSync(skillsDir)) {
+      const skillDir = path.join(skillsDir, entry);
+      const skillMd = path.join(skillDir, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      const content = fs.readFileSync(skillMd, 'utf-8');
+      const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+      const frontmatterName = match
+        ? match[1].match(/^name:\s*(.+)$/m)?.[1]?.trim()
+        : null;
+
+      if (entry === skillName || frontmatterName === skillName) {
+        // Collect non-SKILL.md files in the skill directory
+        const files: string[] = [];
+        const walk = (dir: string, prefix = '') => {
+          for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+            const rel = prefix ? `${prefix}/${f.name}` : f.name;
+            if (f.isDirectory()) {
+              walk(path.join(dir, f.name), rel);
+            } else if (f.name !== 'SKILL.md') {
+              files.push(rel);
+            }
+          }
+        };
+        walk(skillDir);
+
+        return { instructions: content, files };
+      }
+    }
+
+    return null;
   }
 }
