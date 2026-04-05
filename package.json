@@ -26,6 +26,7 @@
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
     "grammy": "^1.39.3",
+    "openai": "^6.33.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {

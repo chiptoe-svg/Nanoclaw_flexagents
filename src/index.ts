@@ -24,10 +24,12 @@ import {
   ContainerOutput,
   DefaultContainerManager,
   DefaultToolExecutor,
+  OpenAIRuntime,
   ToolBroker,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './runtime/index.js';
+import type { AgentRuntime } from './runtime/types.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -320,10 +322,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 const containerManager = new DefaultContainerManager();
 const toolExecutor = new DefaultToolExecutor(containerManager);
 
-function createRuntime(group: RegisteredGroup): ClaudeRuntime {
-  // TODO: Select runtime based on group.containerConfig?.runtime
-  // For now, always use Claude.
-  return new ClaudeRuntime();
+function createRuntime(group: RegisteredGroup): AgentRuntime {
+  const runtime = group.containerConfig?.runtime || 'claude';
+  switch (runtime) {
+    case 'openai':
+      return new OpenAIRuntime();
+    case 'claude':
+    default:
+      return new ClaudeRuntime();
+  }
 }
 
 async function runAgent(
@@ -392,6 +399,17 @@ async function runAgent(
       if (event.sessionId) {
         sessions[group.folder] = event.sessionId;
         setSession(group.folder, event.sessionId);
+      }
+
+      // For runtimes that yield results via AgentEvent (e.g. OpenAI),
+      // forward the result through the onOutput callback so the message
+      // gets sent to the user. Claude uses _onStreamedOutput instead.
+      if (event.type === 'result' && event.result && onOutput) {
+        await onOutput({
+          status: 'success',
+          result: event.result,
+          newSessionId: event.sessionId,
+        });
       }
 
       if (event.type === 'error') {

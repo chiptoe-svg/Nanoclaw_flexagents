@@ -11,11 +11,7 @@ import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import {
-  getContainerImage,
-  DATA_DIR,
-  TIMEZONE,
-} from '../config.js';
+import { getContainerImage, DATA_DIR, TIMEZONE } from '../config.js';
 import {
   runContainerAgent,
   writeGroupsSnapshot,
@@ -27,7 +23,10 @@ import {
   hostGatewayArgs,
   readonlyMountArgs,
 } from '../container-runtime.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from '../group-folder.js';
+import {
+  resolveGroupFolderPath,
+  resolveGroupIpcPath,
+} from '../group-folder.js';
 import { logger } from '../logger.js';
 import { RegisteredGroup } from '../types.js';
 
@@ -74,7 +73,9 @@ export class DefaultContainerManager implements IContainerManager {
     }
 
     if (!this.toolBroker || this.toolBrokerPort === 0) {
-      throw new Error('Tool broker not initialized — call setToolBroker() first');
+      throw new Error(
+        'Tool broker not initialized — call setToolBroker() first',
+      );
     }
 
     // Spawn a tool-runner container

@@ -115,10 +115,7 @@ export class ToolBroker {
    * Wait for a container to connect for a group.
    * Returns when the connection is established or times out.
    */
-  waitForConnection(
-    groupFolder: string,
-    timeoutMs = 30_000,
-  ): Promise<void> {
+  waitForConnection(groupFolder: string, timeoutMs = 30_000): Promise<void> {
     if (this.isConnected(groupFolder)) {
       return Promise.resolve();
     }
@@ -155,9 +152,7 @@ export class ToolBroker {
   ): Promise<ToolResultMessage> {
     const ws = this.connections.get(groupFolder);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error(
-        `No connected tool-runner for group: ${groupFolder}`,
-      );
+      throw new Error(`No connected tool-runner for group: ${groupFolder}`);
     }
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -166,7 +161,9 @@ export class ToolBroker {
       const timer = setTimeout(() => {
         this.pendingCalls.delete(id);
         reject(
-          new Error(`Tool call ${tool} timed out after ${TOOL_CALL_TIMEOUT_MS}ms`),
+          new Error(
+            `Tool call ${tool} timed out after ${TOOL_CALL_TIMEOUT_MS}ms`,
+          ),
         );
       }, TOOL_CALL_TIMEOUT_MS);
 
@@ -192,7 +189,10 @@ export class ToolBroker {
 
   private handleConnection(ws: WebSocket, req: IncomingMessage): void {
     // Extract group from query string: ws://host:port?group=telegram_main
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const url = new URL(
+      req.url || '/',
+      `http://${req.headers.host || 'localhost'}`,
+    );
     const groupFolder = url.searchParams.get('group');
 
     if (!groupFolder) {
@@ -204,7 +204,10 @@ export class ToolBroker {
     // Close existing connection for this group (if any)
     const existing = this.connections.get(groupFolder);
     if (existing && existing.readyState === WebSocket.OPEN) {
-      logger.debug({ groupFolder }, 'Replacing existing tool-runner connection');
+      logger.debug(
+        { groupFolder },
+        'Replacing existing tool-runner connection',
+      );
       existing.close();
     }
 
