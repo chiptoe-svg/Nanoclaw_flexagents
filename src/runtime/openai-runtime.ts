@@ -47,6 +47,7 @@ export class OpenAIRuntime implements AgentRuntime {
         script: config.script,
         runtime: 'openai',
         model,
+        baseUrl: config.group.containerConfig?.baseUrl,
       },
       onProcess: (proc, containerName) =>
         config.onProcess(proc, containerName, config.group.folder),

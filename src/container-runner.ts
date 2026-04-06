@@ -48,6 +48,7 @@ export interface ContainerInput {
   script?: string;
   runtime?: 'claude' | 'openai' | string;
   model?: string;
+  baseUrl?: string;
 }
 
 export interface ContainerOutput {
@@ -318,6 +319,7 @@ function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   image: string,
+  group: RegisteredGroup,
   runtime?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
@@ -352,10 +354,12 @@ function buildContainerArgs(
         args.push('-e', `OPENAI_API_KEY=${secrets.OPENAI_API_KEY}`);
       }
     }
-    // LiteLLM or custom base URL support
+    // Custom base URL: per-group override (LiteLLM) > global .env > none
+    const groupBaseUrl = group.containerConfig?.baseUrl;
     const envSecrets = readEnvFile(['OPENAI_BASE_URL']);
-    if (envSecrets.OPENAI_BASE_URL) {
-      args.push('-e', `OPENAI_BASE_URL=${envSecrets.OPENAI_BASE_URL}`);
+    const baseUrl = groupBaseUrl || envSecrets.OPENAI_BASE_URL;
+    if (baseUrl) {
+      args.push('-e', `OPENAI_BASE_URL=${baseUrl}`);
     }
   }
 
@@ -405,6 +409,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     image,
+    group,
     runtime,
   );
 

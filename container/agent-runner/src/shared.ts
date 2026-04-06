@@ -25,6 +25,7 @@ export interface ContainerInput {
   script?: string;
   runtime?: 'claude' | 'openai' | string;
   model?: string;
+  baseUrl?: string;
 }
 
 export interface ContainerOutput {

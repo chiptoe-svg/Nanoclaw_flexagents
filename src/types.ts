@@ -34,6 +34,7 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
   runtime?: AgentRuntime; // Default from .env DEFAULT_RUNTIME
   model?: string; // Default from .env OPENAI_MODEL. Per-group model override.
+  baseUrl?: string; // Custom API endpoint (e.g. LiteLLM proxy for local/alternative models)
 }
 
 export interface RegisteredGroup {

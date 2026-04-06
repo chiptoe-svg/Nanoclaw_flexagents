@@ -486,7 +486,7 @@ NANOCLAW_IS_MAIN = "${containerInput.isMain ? '1' : '0'}"
 
   const codex = new Codex({
     apiKey: process.env.OPENAI_API_KEY,
-    baseUrl: process.env.OPENAI_BASE_URL,
+    baseUrl: containerInput.baseUrl || process.env.OPENAI_BASE_URL,
   });
 
   const threadOptions = {
