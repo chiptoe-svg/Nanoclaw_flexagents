@@ -323,9 +323,14 @@ export class TelegramChannel implements Channel {
 
         if (runtimeModels.length > 0) {
           reply +=
-            '\n\n*' + runtime + ' models:*\n' +
+            '\n\n*' +
+            runtime +
+            ' models:*\n' +
             runtimeModels
-              .map((m) => `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`)
+              .map(
+                (m) =>
+                  `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`,
+              )
               .join('\n');
         }
 
@@ -333,7 +338,10 @@ export class TelegramChannel implements Channel {
           reply +=
             '\n\n*Local models (OMLX):*\n' +
             localModels
-              .map((m) => `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`)
+              .map(
+                (m) =>
+                  `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`,
+              )
               .join('\n');
         }
 
@@ -341,7 +349,10 @@ export class TelegramChannel implements Channel {
           reply +=
             '\n\n*Custom models (LiteLLM):*\n' +
             customModels
-              .map((m) => `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`)
+              .map(
+                (m) =>
+                  `${m.id === currentModel ? '→' : '  '} \`${m.id}\` — ${m.name}`,
+              )
               .join('\n');
         }
 
@@ -387,7 +398,11 @@ export class TelegramChannel implements Channel {
         containerConfig: config,
       });
 
-      const via = isLocalModel ? ' (local via OMLX)' : isCustomModel ? ' (via LiteLLM)' : '';
+      const via = isLocalModel
+        ? ' (local via OMLX)'
+        : isCustomModel
+          ? ' (via LiteLLM)'
+          : '';
       ctx.reply(`Model switched to *${target}*${via}`, {
         parse_mode: 'Markdown',
       });

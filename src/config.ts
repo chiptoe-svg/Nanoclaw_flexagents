@@ -56,10 +56,6 @@ const RUNTIME_IMAGES: Record<string, string | undefined> = {
 
 export const DEFAULT_RUNTIME = envConfig.DEFAULT_RUNTIME || 'claude';
 export const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
-export const TOOL_BROKER_PORT = parseInt(
-  process.env.TOOL_BROKER_PORT || '3002',
-  10,
-);
 
 /** Available models grouped by provider. Used by /model command. */
 export const AVAILABLE_MODELS: Record<
@@ -83,7 +79,10 @@ export const AVAILABLE_MODELS: Record<
   local: [
     { id: 'mlx-community/Llama-3.1-8B-Instruct', name: 'Llama 3.1 8B (local)' },
     { id: 'mlx-community/Qwen2.5-7B-Instruct', name: 'Qwen 2.5 7B (local)' },
-    { id: 'mlx-community/DeepSeek-R1-0528-Qwen3-8B', name: 'DeepSeek R1 8B (local)' },
+    {
+      id: 'mlx-community/DeepSeek-R1-0528-Qwen3-8B',
+      name: 'DeepSeek R1 8B (local)',
+    },
   ],
   // Custom models via LiteLLM. Requires LITELLM_URL in .env.
   custom: [

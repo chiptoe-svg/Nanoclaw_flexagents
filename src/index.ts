@@ -12,7 +12,6 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   POLL_INTERVAL,
   TIMEZONE,
-  TOOL_BROKER_PORT,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
@@ -26,7 +25,6 @@ import {
   DefaultContainerManager,
   DefaultToolExecutor,
   OpenAIRuntime,
-  ToolBroker,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './runtime/index.js';
@@ -611,16 +609,10 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
-  // Start tool broker (tool-runner containers connect via WebSocket)
-  const toolBroker = new ToolBroker();
-  await toolBroker.start(TOOL_BROKER_PORT, PROXY_BIND_HOST);
-  containerManager.setToolBroker(toolBroker, TOOL_BROKER_PORT);
-
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
-    await containerManager.shutdown(5000);
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

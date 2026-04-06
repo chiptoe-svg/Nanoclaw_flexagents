@@ -21,4 +21,3 @@ export {
 export { ClaudeRuntime } from './claude-runtime.js';
 export { OpenAIRuntime } from './openai-runtime.js';
 export { DefaultToolExecutor } from './tool-executor.js';
-export { ToolBroker } from './tool-broker.js';
