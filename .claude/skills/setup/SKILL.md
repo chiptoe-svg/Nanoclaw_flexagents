@@ -138,106 +138,64 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
+## 3d. Agent SDK
+
+AskUserQuestion (multiSelect): Which agent SDKs do you want to install?
+- **Codex (OpenAI)** (recommended) — supports cloud models (GPT-5.x) and local models (OMLX, Ollama). Authenticates via ChatGPT subscription or API key.
+- **Claude (Anthropic)** — cloud-only. Authenticates via Claude subscription OAuth or API key.
+
+For each selected SDK, invoke its skill:
+- **Codex:** Invoke `/add-agentSDK-codex`
+- **Claude:** Invoke `/add-agentSDK-claude`
+
+Each skill merges its branch, adds dependencies, and updates the container image.
+
+After all SDK skills complete, rebuild:
+```bash
+npm install && npm run build && ./container/build.sh
+```
+
+If only one SDK is selected, set it as the default:
+```bash
+# Add to .env
+echo 'DEFAULT_RUNTIME=codex' >> .env   # or 'claude'
+```
+
+If both are selected, ask which should be the default.
+
 ## 4. Credential System
 
-The credential system depends on the container runtime chosen in step 3.
+The credential system depends on which agent SDK(s) were installed in step 3d.
 
-### 4a. Docker → OneCLI
+### 4a. Codex (OpenAI) credentials
 
-Install OneCLI and its CLI tool:
+AskUserQuestion: Do you want to use your **ChatGPT subscription** or an **OpenAI API key**?
 
-```bash
-curl -fsSL onecli.sh/install | sh
-curl -fsSL onecli.sh/cli/install | sh
-```
+1. **ChatGPT subscription (recommended)** — Run `codex auth login` in another terminal. It opens a browser for OAuth.
+2. **OpenAI API key** — Add `OPENAI_API_KEY=sk-...` to `.env`
 
-Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
+For subscription: tell the user to run `codex auth login` in another terminal. Wait for confirmation. Verify: `ls ~/.codex/auth.json` should exist.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-# Persist for future sessions (append to shell profile if not already present)
-grep -q '.local/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-```
+### 4b. Claude (Anthropic) credentials
 
-Then re-verify with `onecli version`.
-
-Point the CLI at the local OneCLI instance (it defaults to the cloud service otherwise):
-```bash
-onecli config set api-host http://127.0.0.1:10254
-```
-
-Ensure `.env` has the OneCLI URL (create the file if it doesn't exist):
-```bash
-grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=http://127.0.0.1:10254' >> .env
-```
-
-Check if a secret already exists:
-```bash
-onecli secrets list
-```
-
-If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
+Only if Claude SDK was installed.
 
 AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
 
-1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. You'll run `claude setup-token` in another terminal to get your token."
-2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+1. **Claude subscription (Pro/Max)** — Run `claude setup-token` in another terminal, copy the token.
+2. **Anthropic API key** — Get a key from https://console.anthropic.com/settings/keys
 
-#### Subscription path
-
-Tell the user:
-
-> Run `claude setup-token` in another terminal. It will output a token — copy it but don't paste it here.
-
-Then stop and wait for the user to confirm they have the token. Do NOT proceed until they respond.
-
-Once they confirm, they register it with OneCLI. AskUserQuestion with two options:
-
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
-2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
-
-#### API key path
-
-Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
-
-Then AskUserQuestion with two options:
-
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
-2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
-
-#### After either path
-
-Ask them to let you know when done.
-
-**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
-
-**After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
-
-### 4b. Apple Container → Native Credential Proxy
-
-Apple Container is not compatible with OneCLI. The credential proxy code is already included in the apple-container branch — do NOT invoke `/use-native-credential-proxy` (it would conflict with already-applied code).
-
-Instead, just configure the credentials in `.env`:
-
-AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
-
-1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. Run `claude setup-token` in another terminal to get your token."
-2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
-
-For subscription: tell the user to run `claude setup-token` in another terminal. Stop and wait for the user to confirm they have completed this step successfully before proceeding.
-
-Once confirmed, add the token to `.env`:
+For subscription: tell the user to run `claude setup-token`. Wait for the token. Add to `.env`:
 ```bash
-echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> .env
 ```
 
 For API key: add to `.env`:
 ```bash
-echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+echo 'ANTHROPIC_API_KEY=<key>' >> .env
 ```
 
-Verify the proxy starts: `npm run dev` should show "Credential proxy listening" in the logs.
+**If the user's response contains a token or key** (starts with `sk-ant-`): write it to `.env` on their behalf.
 
 ## 5. Set Up Channels
 
