@@ -2,12 +2,13 @@
  * Google Gemini CLI runtime for the container agent-runner.
  * Self-registers with the container runtime registry.
  *
- * Uses Gemini CLI in non-interactive mode with --yolo (auto-approve).
- * Captures output for archiving and follow-up processing.
+ * Uses Gemini CLI with --output-format stream-json for structured
+ * streaming events. Captures tool calls, file changes, and reasoning
+ * for logging and archiving.
  */
 import fs from 'fs';
 import path from 'path';
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 
 import {
   ContainerInput,
@@ -20,8 +21,6 @@ import {
   writeOutput,
 } from '../shared.js';
 import { registerContainerRuntime, type QueryResult } from '../runtime-registry.js';
-
-const MAX_OUTPUT = 200 * 1024;
 
 // --- Gemini query ---
 
@@ -85,9 +84,6 @@ async function runGeminiQuery(
       if (fs.statSync(fullPath).isDirectory()) extraDirs.push(fullPath);
     }
   }
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
 
   const model = containerInput.model || 'gemini-2.5-flash';
   let closedDuringQuery = false;
@@ -105,15 +101,24 @@ async function runGeminiQuery(
   setTimeout(pollIpc, 500);
 
   try {
-    const resultText = await runGeminiCli(prompt, model, extraDirs);
+    const { resultText, toolCalls } = await runGeminiStreaming(prompt, model);
 
-    // Archive conversation with whatever detail we have
+    // Rich conversation archive with tool activity
+    const archiveMessages: ParsedMessage[] = [
+      { role: 'user', content: prompt },
+    ];
+    if (toolCalls.length > 0) {
+      archiveMessages.push({
+        role: 'assistant',
+        content: `[Tool calls]\n${toolCalls.join('\n')}`,
+      });
+    }
     if (resultText) {
+      archiveMessages.push({ role: 'assistant', content: resultText });
+    }
+
+    if (archiveMessages.length > 1) {
       try {
-        const archiveMessages: ParsedMessage[] = [
-          { role: 'user', content: prompt },
-          { role: 'assistant', content: resultText },
-        ];
         const conversationsDir = '/workspace/group/conversations';
         fs.mkdirSync(conversationsDir, { recursive: true });
         const date = new Date().toISOString().split('T')[0];
@@ -131,16 +136,16 @@ async function runGeminiQuery(
 
     writeOutput({ status: 'success', result: resultText, newSessionId: undefined });
 
-    // Post-turn follow-ups: process IPC messages that arrived during the turn
+    // Post-turn follow-ups
     ipcPolling = false;
     const pendingMessages = drainIpcInput();
     if (pendingMessages.length > 0 && !closedDuringQuery) {
       log(`Processing ${pendingMessages.length} IPC message(s) that arrived during turn`);
       const followUp = pendingMessages.join('\n');
       try {
-        const followUpResult = await runGeminiCli(followUp, model, extraDirs);
-        if (followUpResult) {
-          writeOutput({ status: 'success', result: followUpResult, newSessionId: undefined });
+        const followUpResult = await runGeminiStreaming(followUp, model);
+        if (followUpResult.resultText) {
+          writeOutput({ status: 'success', result: followUpResult.resultText, newSessionId: undefined });
         }
       } catch (err) {
         log(`Follow-up error: ${err instanceof Error ? err.message : String(err)}`);
@@ -156,45 +161,165 @@ async function runGeminiQuery(
   return { newSessionId: undefined, closedDuringQuery };
 }
 
-// --- Gemini CLI execution ---
+// --- Streaming CLI execution with JSON event parsing ---
 
-function runGeminiCli(
+function runGeminiStreaming(
   prompt: string,
   model: string,
-  extraDirs: string[],
-): Promise<string | null> {
+): Promise<{ resultText: string | null; toolCalls: string[] }> {
   return new Promise((resolve, reject) => {
-    const args = ['-p', prompt, '--yolo', '--model', model];
+    const args = [
+      '-p', prompt,
+      '--yolo',
+      '--model', model,
+      '--output-format', 'stream-json',
+    ];
 
-    // Pass additional directories if supported
-    // Note: Gemini CLI may not support --additional-directories flag;
-    // the directories are mounted and accessible via filesystem tools
+    log(`Running: gemini --model ${model} --output-format stream-json`);
 
-    log(`Running: gemini -p "${prompt.slice(0, 60)}..." --model ${model}`);
+    const proc = spawn('gemini', args, {
+      cwd: '/workspace/group',
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
-    execFile(
-      'gemini',
-      args,
-      {
-        cwd: '/workspace/group',
-        timeout: 120_000,
-        maxBuffer: MAX_OUTPUT,
-        env: process.env,
-      },
-      (error, stdout, stderr) => {
-        if (stderr) {
-          for (const line of stderr.trim().split('\n')) {
-            if (line) log(`[gemini] ${line}`);
+    let resultText: string | null = null;
+    const toolCalls: string[] = [];
+    let stderr = '';
+    let jsonBuffer = '';
+
+    // Parse streaming JSON events from stdout
+    proc.stdout.on('data', (chunk: Buffer) => {
+      jsonBuffer += chunk.toString();
+
+      // Split by newlines — each line is a JSON event
+      const lines = jsonBuffer.split('\n');
+      jsonBuffer = lines.pop() || ''; // keep incomplete last line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          processEvent(event, toolCalls);
+
+          // Capture final text content
+          if (event.type === 'content' && event.value) {
+            resultText = (resultText || '') + event.value;
+          }
+          // Also check for message/text patterns
+          if (event.text) {
+            resultText = event.text;
+          }
+          if (event.type === 'result' && event.content) {
+            resultText = event.content;
+          }
+        } catch {
+          // Not JSON — might be raw text output
+          if (line.trim() && !line.startsWith('{')) {
+            resultText = (resultText || '') + line;
           }
         }
-        if (error && !stdout) {
-          reject(new Error(error.message));
-          return;
+      }
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderr += text;
+      // Parse stderr for tool activity (fallback if JSON doesn't capture it)
+      for (const stderrLine of text.trim().split('\n')) {
+        if (!stderrLine) continue;
+        if (stderrLine.includes('Running:') || stderrLine.includes('Executing:')) {
+          const toolInfo = stderrLine.trim();
+          log(`[tool] ${toolInfo}`);
+          toolCalls.push(toolInfo);
+        } else if (stderrLine.includes('Reading') || stderrLine.includes('Writing') || stderrLine.includes('Searching')) {
+          log(`[tool] ${stderrLine.trim()}`);
+          toolCalls.push(stderrLine.trim());
+        } else {
+          log(`[gemini] ${stderrLine}`);
         }
-        resolve(stdout.trim() || null);
-      },
-    );
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      proc.kill('SIGTERM');
+      reject(new Error('Gemini CLI timed out after 120s'));
+    }, 120_000);
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+
+      // Process any remaining buffer
+      if (jsonBuffer.trim()) {
+        try {
+          const event = JSON.parse(jsonBuffer);
+          processEvent(event, toolCalls);
+          if (event.type === 'content' && event.value) {
+            resultText = (resultText || '') + event.value;
+          }
+          if (event.text) resultText = event.text;
+        } catch {
+          if (jsonBuffer.trim() && !resultText) {
+            resultText = jsonBuffer.trim();
+          }
+        }
+      }
+
+      if (code !== 0 && !resultText) {
+        reject(new Error(`Gemini CLI exited with code ${code}: ${stderr.slice(-200)}`));
+        return;
+      }
+
+      resolve({ resultText, toolCalls });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
+}
+
+// --- Event processing ---
+
+function processEvent(event: Record<string, unknown>, toolCalls: string[]): void {
+  const type = event.type as string;
+
+  if (type === 'tool_call_request' || type === 'toolCallRequest') {
+    const value = event.value as Record<string, unknown> | undefined;
+    const name = value?.name || value?.tool || 'unknown';
+    log(`[tool] Call: ${name}`);
+    toolCalls.push(`Tool: ${name}`);
+  }
+
+  if (type === 'tool_call_response' || type === 'toolCallResponse') {
+    const value = event.value as Record<string, unknown> | undefined;
+    const name = value?.name || 'unknown';
+    const output = value?.output || value?.result;
+    const outputStr = typeof output === 'string' ? output.slice(0, 200) : JSON.stringify(output)?.slice(0, 200);
+    log(`[tool] Result: ${name} → ${outputStr}`);
+    if (outputStr) toolCalls.push(`${name}: ${outputStr}`);
+  }
+
+  if (type === 'thought') {
+    const value = event.value as Record<string, unknown> | undefined;
+    const text = value?.text || value?.summary || '';
+    if (text) log(`[thought] ${String(text).slice(0, 100)}`);
+  }
+
+  if (type === 'finished') {
+    const value = event.value as Record<string, unknown> | undefined;
+    const usage = value?.usageMetadata as Record<string, number> | undefined;
+    if (usage) {
+      log(`Gemini usage: ${usage.promptTokenCount || 0} in, ${usage.candidatesTokenCount || 0} out`);
+    }
+  }
+
+  if (type === 'error') {
+    const value = event.value as Record<string, unknown> | undefined;
+    const error = value?.error || value?.message || 'unknown error';
+    log(`[error] ${String(error).slice(0, 200)}`);
+  }
 }
 
 // --- Self-register ---
