@@ -133,8 +133,28 @@ function buildVolumeMounts(
   }
 
   // SDK-specific home directory setup is added by /add-agentSDK-* skills.
+  if (runtime === 'codex') {
+    const hostCodexDir = path.join(process.env.HOME || '/home/node', '.codex');
+    if (fs.existsSync(hostCodexDir)) {
+      const groupCodexDir = path.join(DATA_DIR, 'sessions', group.folder, '.codex');
+      fs.mkdirSync(groupCodexDir, { recursive: true });
+      const authSrc = path.join(hostCodexDir, 'auth.json');
+      if (fs.existsSync(authSrc)) fs.copyFileSync(authSrc, path.join(groupCodexDir, 'auth.json'));
+      const configSrc = path.join(hostCodexDir, 'config.toml');
+      if (fs.existsSync(configSrc)) fs.copyFileSync(configSrc, path.join(groupCodexDir, 'config.toml'));
+      const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+      const skillsDst = path.join(groupCodexDir, 'skills');
+      if (fs.existsSync(skillsSrc)) {
+        for (const sd of fs.readdirSync(skillsSrc)) {
+          const s = path.join(skillsSrc, sd);
+          if (fs.statSync(s).isDirectory()) fs.cpSync(s, path.join(skillsDst, sd), { recursive: true });
+        }
+      }
+      mounts.push({ hostPath: groupCodexDir, containerPath: '/home/node/.codex', readonly: false });
+    }
+  }
+
   // Base: writable home directory for any runtime.
-  // SDK skills add their own mounts (e.g. .claude/, .codex/) before this block.
   {
     const groupHomeDir = path.join(DATA_DIR, 'sessions', group.folder, 'home');
     fs.mkdirSync(groupHomeDir, { recursive: true });
@@ -219,7 +239,17 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Runtime-specific credential injection is added by /add-agentSDK-* skills.
-  // Each skill appends its own credential block here.
+  if (runtime === 'codex') {
+    const hostAuthFile = path.join(process.env.HOME || '/home/node', '.codex', 'auth.json');
+    if (!fs.existsSync(hostAuthFile)) {
+      const secrets = readEnvFile(['OPENAI_API_KEY']);
+      if (secrets.OPENAI_API_KEY) args.push('-e', `OPENAI_API_KEY=${secrets.OPENAI_API_KEY}`);
+    }
+    const groupBaseUrl = group.containerConfig?.baseUrl;
+    const envSecrets = readEnvFile(['OPENAI_BASE_URL']);
+    const baseUrl = groupBaseUrl || envSecrets.OPENAI_BASE_URL;
+    if (baseUrl) args.push('-e', `OPENAI_BASE_URL=${baseUrl}`);
+  }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
