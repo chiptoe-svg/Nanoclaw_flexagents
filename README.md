@@ -17,24 +17,278 @@
 
 ---
 
-## Why I Built NanoClaw
+## Why NanoClaw
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
+[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but is an incredibly complex piece of software, and the orginal author (qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) was not comfortable with it having full access to his life. OpenClaw has nearly half a million lines of code, 53 config files, 70+ dependencies and lots of real security implications. NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files.
 
-NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. This fork allows for Claude and/or Codex agents to run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+I found it incredibly satisfying to use and grow with new capabilities, but the realities at my work (ChatGPT.edu contract and provacy concerns) made it very challenging to utilize outside of my house. I set out to recreate this tool with the same philosophy and capabilites within an OpenAI framework. The Claude Agent SDK (that Nanoclaw is built on) does a lot of heavy lifting with built-in handling of the agent loop, swarms, tools, containers, etc., and it is difficult to find all of those in a lightweight, easy use framework elsewhere. Given that this is a personal assistant, I also wanted to keep it within a subscription use case (ie. chatgpt login). I settled on using the Codex SDK - it is not a perfect fit, and out of the box it fell short in several areas, but was able to add some functionality to mimic most of the Claude Agent SDK features. 
+
+In keeping with the orginal Nanoclaw philosophy, I abstracted all of this out of the main install, and created an /add-agentSDK-claude and /add-agentSDK-codex that you use during setup to add one or both (like you would a channel). You can run either or both - each agent gets its own container with all of its own agentSDK trimmings, but I think most will just pick the agentSDK that makes the most sense for their environment and subscription plan. One side benefit of the CodexSDK is that has support for using a local model completely (you can do that to some extent with Claude Agent SDK using MCP to go out to Ollama for instance, but my understanding is that planning is still all done with anthropic models no matter what so privacy issues still exist). Keep in mind you lose a lot going with a local model, but for certain use cases, it may be necessary (I plan to use it as a classifier to prescreen any data that I am referencing to eliminate possible sharing of private or senstive information).
+
+I did keep the backend Claude Code - I imagine that coud be changed to Codex, but I am just really comfortable in claude code... A couple of minor things: I was struggling to get onecli to work in both so I kept the old .env method. And agent swarms are not supported by Codex - this doesnt affect my use case so it wasn't a priority, and it will take some effort to build that capability in.
+
+Here is the comparison of capabilties between the two:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Agent SDK vs Codex Agent SDK</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-row: #f8f9fa;
+    --bg-header: #1e3a5f;
+    --text: #1a1a2e;
+    --text-muted: #555;
+    --border: #ddd;
+    --green: #1a7f37;
+    --yellow: #9a6700;
+    --blue: #0550ae;
+    --green-bg: #dafbe1;
+    --yellow-bg: #fff8c5;
+    --blue-bg: #ddf4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-row: #161b22;
+      --bg-header: #1e3a5f;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --border: #30363d;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --blue: #58a6ff;
+      --green-bg: #12261e;
+      --yellow-bg: #272115;
+      --blue-bg: #121d2f;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 {
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    background: var(--bg-header);
+    color: #fff;
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: var(--bg-row); }
+  .feature { font-weight: 600; white-space: nowrap; }
+  .status { white-space: nowrap; font-weight: 600; font-size: 12px; }
+  .status-same { color: var(--green); }
+  .status-functional { color: var(--yellow); }
+  .status-better-codex { color: var(--green); }
+  .status-better-claude { color: var(--blue); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-same { background: var(--green-bg); color: var(--green); }
+  .badge-functional { background: var(--yellow-bg); color: var(--yellow); }
+  .badge-codex { background: var(--green-bg); color: var(--green); }
+  .badge-claude { background: var(--blue-bg); color: var(--blue); }
+  .legend {
+    margin-top: 16px;
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .legend .badge { margin-right: 4px; }
+  code {
+    font-size: 12px;
+    background: var(--bg-row);
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<h1>Claude Agent SDK vs Codex Agent SDK</h1>
+<p class="subtitle">Feature comparison for the CU Agent multi-runtime architecture</p>
+
+<table>
+<thead>
+<tr>
+  <th style="width:170px">Feature</th>
+  <th style="width:35%">Claude</th>
+  <th style="width:35%">Codex</th>
+  <th style="width:140px">Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td class="feature">Streaming events</td>
+  <td>Full &mdash; messages, tool calls, results streamed in real-time via async iterable</td>
+  <td>Full &mdash; <code>runStreamed()</code> with item.started/completed events</td>
+  <td><span class="badge badge-same">Same</span></td>
+</tr>
+<tr>
+  <td class="feature">IPC follow-up messages</td>
+  <td>Messages injected into active query in real-time (mid-turn)</td>
+  <td>Messages processed as next turn after current turn completes. Context preserved across turns via thread.</td>
+  <td><span class="badge badge-functional">Functional</span><br><small>slight delay</small></td>
+</tr>
+<tr>
+  <td class="feature">Session resume</td>
+  <td>Resume by session ID + UUID with precise re-entry point</td>
+  <td>Fresh thread each container start. Context via <code>conversations/</code> archive and <code>memory/</code> directory.</td>
+  <td><span class="badge badge-functional">Different approach</span><br><small>reliable, no errors</small></td>
+</tr>
+<tr>
+  <td class="feature">Conversation archiving</td>
+  <td>Pre-compact hook archives full multi-turn JSONL transcript. Uses session summary for filename.</td>
+  <td>Per-turn archive from stream events &mdash; captures prompt, tool calls, command output, and response.</td>
+  <td><span class="badge badge-functional">Functional</span><br><small>per-turn, not multi-turn</small></td>
+</tr>
+<tr>
+  <td class="feature">Session summary filenames</td>
+  <td>Reads <code>sessions-index.json</code> for intelligent filename</td>
+  <td>Uses first 50 chars of prompt</td>
+  <td><span class="badge badge-functional">Functional</span><br><small>less descriptive</small></td>
+</tr>
+<tr>
+  <td class="feature">Global instructions</td>
+  <td>Loaded from <code>AGENT.md</code>, injected via <code>systemPrompt.append</code></td>
+  <td>Assembled into <code>AGENTS.md</code> from global + group sources</td>
+  <td><span class="badge badge-same">Same</span><br><small>diff mechanism</small></td>
+</tr>
+<tr>
+  <td class="feature">Persona file sync</td>
+  <td>Copies <code>AGENT.md</code> &rarr; <code>CLAUDE.md</code> for SDK discovery</td>
+  <td>Assembles <code>AGENTS.md</code> from sources + Codex tool guidance appended</td>
+  <td><span class="badge badge-same">Same</span><br><small>diff mechanism</small></td>
+</tr>
+<tr>
+  <td class="feature">MCP server config</td>
+  <td>Passed via <code>query()</code> options (code)</td>
+  <td>Written to <code>config.toml</code> (file)</td>
+  <td><span class="badge badge-same">Same</span><br><small>diff mechanism</small></td>
+</tr>
+<tr>
+  <td class="feature">Additional directories</td>
+  <td><code>additionalDirectories</code> from <code>/workspace/extra/</code></td>
+  <td><code>additionalDirectories</code> passed to thread options</td>
+  <td><span class="badge badge-same">Same</span></td>
+</tr>
+<tr>
+  <td class="feature">Skill loading</td>
+  <td>On-demand from <code>.claude/skills/</code> via description matching + Skill tool</td>
+  <td>On-demand from <code>.codex/skills/</code> via description matching</td>
+  <td><span class="badge badge-same">Same</span><br><small>diff mechanism</small></td>
+</tr>
+<tr>
+  <td class="feature">Tool quality</td>
+  <td>18 built-in tools: fuzzy edit, numbered read, ripgrep search</td>
+  <td>Shell + <code>apply_patch</code>. Guided via <code>AGENTS.md</code> instructions (<code>cat -n</code>, <code>grep -rn</code>, <code>find</code>).</td>
+  <td><span class="badge badge-functional">Functional</span><br><small>less polished, same capabilities</small></td>
+</tr>
+<tr>
+  <td class="feature">Usage tracking</td>
+  <td>Not logged</td>
+  <td>Input/output tokens logged per turn</td>
+  <td><span class="badge badge-codex">Codex better</span></td>
+</tr>
+<tr>
+  <td class="feature">Error handling</td>
+  <td>Separate message types (<code>system/init</code>, <code>result/error</code>)</td>
+  <td>Catch block + stale session detection via regex</td>
+  <td><span class="badge badge-same">Same</span></td>
+</tr>
+<tr>
+  <td class="feature">Local models</td>
+  <td>Not possible (Anthropic API only)</td>
+  <td><code>baseUrl</code> routes to OMLX, Ollama, LiteLLM, or any OpenAI-compatible endpoint. Per-group via <code>/model</code>.</td>
+  <td><span class="badge badge-codex">Codex only</span></td>
+</tr>
+<tr>
+  <td class="feature">Multi-agent orchestration</td>
+  <td>Agent teams &mdash; orchestrator spawns subagents via TeamCreate/TeamDelete/SendMessage. Shared context.</td>
+  <td>Not in SDK. Achievable at host level: main group delegates to specialist groups via IPC + scheduled tasks. No shared context.</td>
+  <td><span class="badge badge-claude">Claude better</span><br><small>native vs host-managed</small></td>
+</tr>
+<tr>
+  <td class="feature">Agent swarms</td>
+  <td>Telegram swarm skill &mdash; each subagent gets own bot identity in group chat. Native SDK support.</td>
+  <td>Not available. Would require host-level orchestration + multiple bot tokens.</td>
+  <td><span class="badge badge-claude">Claude only</span></td>
+</tr>
+<tr>
+  <td class="feature">Credential management</td>
+  <td>Credential proxy (port 3001). OAuth + API key. Containers see placeholders only.</td>
+  <td><code>~/.codex/auth.json</code> mount. Subscription or API key from <code>.env</code>.</td>
+  <td><span class="badge badge-same">Same</span><br><small>diff mechanism</small></td>
+</tr>
+<tr>
+  <td class="feature">Auth switching</td>
+  <td><code>/auth</code>: toggle API key / OAuth. Persists via <code>.env</code> commenting.</td>
+  <td><code>/auth</code>: shows subscription and API key status.</td>
+  <td><span class="badge badge-same">Same</span></td>
+</tr>
+<tr>
+  <td class="feature">Model selection</td>
+  <td><code>/model</code> with 4 Claude models. Cloud only.</td>
+  <td><code>/model</code> with 4 OpenAI models + local (OMLX) + custom (LiteLLM).</td>
+  <td><span class="badge badge-codex">Codex better</span><br><small>more options</small></td>
+</tr>
+</tbody>
+</table>
+
+<div class="legend">
+  <span><span class="badge badge-same">Same</span> Feature parity</span>
+  <span><span class="badge badge-functional">Functional</span> Works with minor differences</span>
+  <span><span class="badge badge-codex">Codex better/only</span> Codex advantage</span>
+  <span><span class="badge badge-claude">Claude better/only</span> Claude advantage</span>
+</div>
+</body>
+</html>
 
 ## Quick Start
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
+gh repo fork chiptoe-svg/nanoclaw_flexagents --clone
 cd nanoclaw
 claude
 ```
 
+
 <details>
 <summary>Without GitHub CLI</summary>
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
+1. Fork [chiptoe-svg/nanoclaw_flexagents](https://github.com/chiptoe-svg/nanoclaw_flexagents) on GitHub (click the Fork button)
 2. `git clone https://github.com/<your-username>/nanoclaw.git`
 3. `cd nanoclaw`
 4. `claude`
