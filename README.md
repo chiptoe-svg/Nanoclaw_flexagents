@@ -34,55 +34,7 @@ Here is the comparison of capabilties between the two:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  
  
-  th {
-    background: var(--bg-header);
-    color: #fff;
-    text-align: left;
-    padding: 12px 14px;
-    font-weight: 600;
-    position: sticky;
-    top: 0;
-  }
-  td {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: top;
-  }
-  tr:nth-child(even) td { background: var(--bg-row); }
-  .feature { font-weight: 600; white-space: nowrap; }
-  .status { white-space: nowrap; font-weight: 600; font-size: 12px; }
-  .status-same { color: var(--green); }
-  .status-functional { color: var(--yellow); }
-  .status-better-codex { color: var(--green); }
-  .status-better-claude { color: var(--blue); }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .badge-same { background: var(--green-bg); color: var(--green); }
-  .badge-functional { background: var(--yellow-bg); color: var(--yellow); }
-  .badge-codex { background: var(--green-bg); color: var(--green); }
-  .badge-claude { background: var(--blue-bg); color: var(--blue); }
-  .legend {
-    margin-top: 16px;
-    display: flex;
-    gap: 16px;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  .legend .badge { margin-right: 4px; }
-  code {
-    font-size: 12px;
-    background: var(--bg-row);
-    padding: 1px 4px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
-  }
 </style>
 </head>
 <body>
