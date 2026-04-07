@@ -36,6 +36,9 @@ try { await import('./runtimes/claude.js'); } catch { /* SDK not installed */ }
 // codex (codex)
 try { await import('./runtimes/codex.js'); } catch { /* SDK not installed */ }
 
+// gemini (google)
+try { await import('./runtimes/gemini.js'); } catch { /* CLI not installed */ }
+
 // --- Main ---
 
 async function main(): Promise<void> {

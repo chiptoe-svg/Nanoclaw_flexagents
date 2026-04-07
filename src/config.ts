@@ -74,6 +74,11 @@ export const AVAILABLE_MODELS: Record<
     { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5' },
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   ],
+  gemini: [
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro — max capability' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash — balanced' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite — fast/free' },
+  ],
   // Local models via OMLX (direct, no LiteLLM needed).
   // Requires OMLX running: brew services start omlx
   local: [

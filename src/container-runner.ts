@@ -361,6 +361,14 @@ function buildContainerArgs(
     if (baseUrl) {
       args.push('-e', `OPENAI_BASE_URL=${baseUrl}`);
     }
+  } else if (runtime === 'gemini') {
+    // Google Gemini: API key from .env
+    const secrets = readEnvFile(['GEMINI_API_KEY', 'GOOGLE_API_KEY']);
+    const apiKey = secrets.GEMINI_API_KEY || secrets.GOOGLE_API_KEY;
+    if (apiKey) {
+      args.push('-e', `GEMINI_API_KEY=${apiKey}`);
+      args.push('-e', `GOOGLE_API_KEY=${apiKey}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution

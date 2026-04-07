@@ -7,3 +7,6 @@ import './claude-runtime.js';
 
 // codex (openai)
 import './codex-runtime.js';
+
+// gemini (google)
+import './gemini-runtime.js';
