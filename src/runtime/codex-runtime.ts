@@ -1,5 +1,5 @@
 /**
- * OpenAIRuntime — AgentRuntime implementation using OpenAI Codex SDK.
+ * CodexRuntime — AgentRuntime implementation using OpenAI Codex SDK.
  *
  * Like ClaudeRuntime, the agent loop runs inside a container via the
  * agent-runner. The agent-runner detects runtime='openai' and uses
@@ -20,7 +20,7 @@ import type {
 } from './types.js';
 import { registerAgentSdk } from './registry.js';
 
-export class OpenAIRuntime implements AgentRuntime {
+export class CodexRuntime implements AgentRuntime {
   readonly id: RuntimeId = 'codex';
 
   private containerManager: ContainerManager | null = null;
@@ -102,4 +102,4 @@ export class OpenAIRuntime implements AgentRuntime {
 }
 
 // Self-register
-registerAgentSdk('codex', () => new OpenAIRuntime());
+registerAgentSdk('codex', () => new CodexRuntime());

@@ -5,7 +5,7 @@
  * Each runtime self-registers via runtime-registry.ts when imported.
  *
  * Shared plumbing (IO, IPC, MessageStream) lives in shared.ts.
- * SDK-specific code lives in runtimes/claude.ts and runtimes/openai.ts.
+ * SDK-specific code lives in runtimes/claude.ts and runtimes/codex.ts.
  */
 
 import fs from 'fs';
@@ -33,8 +33,8 @@ import {
 // claude
 try { await import('./runtimes/claude.js'); } catch { /* SDK not installed */ }
 
-// openai (codex)
-try { await import('./runtimes/openai.js'); } catch { /* SDK not installed */ }
+// codex (codex)
+try { await import('./runtimes/codex.js'); } catch { /* SDK not installed */ }
 
 // --- Main ---
 
