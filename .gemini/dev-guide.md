@@ -1,4 +1,4 @@
-# Gemini CLI — Developer Guide
+# Gemini CLI / ADK — Developer Guide
 
 ## Response style
 - Be concise and direct

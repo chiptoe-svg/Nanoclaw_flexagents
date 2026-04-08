@@ -13,9 +13,11 @@ vi.mock('./config.js', () => ({
   CONTAINER_TIMEOUT: 1800000, // 30min
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanoclaw-test-data',
+  DEFAULT_RUNTIME: 'claude',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+  getContainerImage: () => 'nanoclaw-agent:latest',
 }));
 
 // Mock logger
@@ -49,6 +51,17 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
+}));
+
+// Mock runtime-setup
+vi.mock('./runtime-setup.js', () => ({
+  getRuntimeSetup: vi.fn(() => ({
+    prepareHome: () => ({
+      hostPath: '/tmp/nanoclaw-test-data/sessions/test-group/.claude',
+      containerPath: '/home/node/.claude',
+    }),
+    getCredentialEnv: () => ({}),
+  })),
 }));
 
 // Mock container-runtime

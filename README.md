@@ -26,7 +26,7 @@ Three agent SDKs are supported:
 
 - **Codex (OpenAI)** — ChatGPT subscription or API key. Supports local models via OMLX/Ollama. Open source (Rust).
 - **Claude (Anthropic)** — Claude subscription OAuth or API key. Best built-in tools. Agent teams/swarms.
-- **Gemini (Google)** — Free tier available (60 req/min). 15+ built-in tools. Open source (TypeScript). ⚠️ *Added but untested — looking for early testers.*
+- **Gemini (Google)** — Free tier available (60 req/min). Google ADK (Agent Development Kit) with native sub-agents, session persistence, and A2A protocol support. Open source (Python).
 
 You can run one SDK or all three simultaneously — different groups can use different SDKs and models. Your main chat might use Codex with GPT-5.4, a code review group uses Claude Opus, and a research group uses Gemini Flash on the free tier. Each agent gets its own container with its own SDK, persona, memory, and skills. Switch models instantly with `/model` in Telegram.
 
@@ -47,7 +47,7 @@ Then open your preferred development tool:
 |----------|---------|-------------|
 | Claude Code | `claude` | Reads `CLAUDE.md` |
 | Codex CLI | `codex` | Reads `AGENTS.md` |
-| Gemini CLI | `gemini` | Reads `GEMINI.md` |
+| Gemini CLI | `gemini` | Reads `GEMINI.md` (uses Google ADK in containers) |
 
 Run `/setup` inside the CLI. It handles everything: dependencies, container runtime, agent SDK selection, authentication, channels, and service configuration.
 
@@ -75,7 +75,7 @@ Run `/setup` inside the CLI. It handles everything: dependencies, container runt
 - **Web access** — Search and fetch content from the web.
 - **Container isolation** — Agents sandboxed in Docker or Apple Container. Only mounted directories accessible.
 - **Credential security** — Claude uses a credential proxy (containers see placeholders). Codex mounts subscription auth. Gemini uses API key injection. Secrets never exposed to agents.
-- **Agent teams** — Claude SDK supports multi-agent orchestration via TeamCreate/TeamDelete (Codex/Gemini: host-level via IPC).
+- **Agent teams** — Claude SDK supports multi-agent orchestration via TeamCreate/TeamDelete. Gemini ADK supports native sub-agents (SequentialAgent, ParallelAgent, LoopAgent). All runtimes support specialist delegation via MCP tool.
 - **Skills system** — Add capabilities with `/add-*` skills. Both SDKs load skills on-demand from their respective directories.
 
 ## Usage
@@ -105,7 +105,7 @@ Channels → SQLite → Polling loop → AgentRuntime → Container (SDK agent l
                               SDK Registry selects:
                               • ClaudeRuntime  → Claude Agent SDK query()
                               • CodexRuntime   → Codex SDK thread.runStreamed()
-                              • GeminiRuntime  → Gemini CLI subprocess
+                              • GeminiRuntime  → Google ADK (FastAPI sidecar)
 ```
 
 Single Node.js process. Agent SDKs self-register via a modular registry (same pattern as channels). All SDKs share one container image — the agent-runner detects the runtime from config and dispatches to the appropriate SDK module. Per-group message queue with concurrency control. IPC via filesystem.
@@ -162,7 +162,7 @@ Skills we'd like to see:
 
 - macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
-- One of: [Claude Code](https://claude.ai/download), [Codex CLI](https://www.npmjs.com/package/@openai/codex), or [Gemini CLI](https://www.npmjs.com/package/@google/gemini-cli)
+- One of: [Claude Code](https://claude.ai/download), [Codex CLI](https://www.npmjs.com/package/@openai/codex), or [Gemini CLI](https://www.npmjs.com/package/@google/gemini-cli) (for development; containers use Google ADK)
 - [Docker](https://docker.com/products/docker-desktop) or [Apple Container](https://github.com/apple/container) (macOS)
 
 ## FAQ

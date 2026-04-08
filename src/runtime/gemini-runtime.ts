@@ -1,9 +1,9 @@
 /**
- * GeminiRuntime — AgentRuntime implementation for Google Gemini CLI.
+ * GeminiRuntime — AgentRuntime implementation for Google Gemini (ADK).
  *
  * Like ClaudeRuntime and CodexRuntime, delegates to the container via
  * ContainerManager.runAgentSession(). The container agent-runner detects
- * runtime='gemini' and spawns the Gemini CLI.
+ * runtime='gemini' and starts the Google ADK sidecar.
  */
 import { DEFAULT_MODEL } from '../config.js';
 
@@ -93,7 +93,7 @@ export class GeminiRuntime implements AgentRuntime {
   }
 
   shouldClearSession(error: string): boolean {
-    // Clear on Gemini CLI errors that indicate stale state
+    // Clear on Gemini ADK errors that indicate stale state
     return /session.*not found|cache.*expired|invalid.*session/i.test(error);
   }
 }

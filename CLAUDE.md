@@ -1,6 +1,6 @@
 # NanoClaw FlexAgents
 
-Multi-runtime personal assistant built on NanoClaw. Supports Claude, Codex (OpenAI), and Gemini agent SDKs.
+Multi-runtime personal assistant built on NanoClaw. Supports Claude, Codex (OpenAI), and Gemini (Google ADK) agent SDKs.
 
 ## Architecture
 
@@ -34,7 +34,8 @@ All SDKs run inside the same container image. The agent-runner detects the runti
 | `container/agent-runner/src/runtime-registry.ts` | Container-side SDK dispatch |
 | `container/agent-runner/src/runtimes/claude.ts` | Claude SDK query loop |
 | `container/agent-runner/src/runtimes/codex.ts` | Codex SDK query loop |
-| `container/agent-runner/src/runtimes/gemini.ts` | Gemini CLI query loop |
+| `container/agent-runner/src/runtimes/gemini.ts` | Gemini ADK runtime (CLI fallback) |
+| `container/agent-runner/adk/nanoclaw_agent/` | ADK agent definition (Python) |
 | `container/agent-runner/src/shared.ts` | Shared container plumbing (IO, IPC, MessageStream) |
 | `container/agent-runner/src/ipc-mcp-stdio.ts` | MCP server for NanoClaw IPC tools |
 | `container/skills/` | Skills loaded inside agent containers |
@@ -67,7 +68,7 @@ Telegram commands:
 
 **Claude:** OAuth token via `claude setup-token` stored in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`. Credential proxy on port 3001 injects into containers.
 
-**Gemini:** API key from https://aistudio.google.com/apikey stored as `GEMINI_API_KEY` in `.env`. Free tier: 60 req/min.
+**Gemini:** API key from https://aistudio.google.com/apikey stored as `GEMINI_API_KEY` in `.env`. Free tier: 60 req/min. Uses Google ADK (Agent Development Kit) with session persistence, native sub-agents, and A2A protocol support.
 
 ## Agent Persona (AGENT.md)
 
@@ -76,7 +77,8 @@ Telegram commands:
 Inside the container, the agent-runner assembles the final instructions:
 - **Codex:** concatenates `global/AGENT.md` + `group/AGENT.md` → writes `AGENTS.md`
 - **Claude:** copies `AGENT.md` → `CLAUDE.md` for SDK discovery, injects global via system prompt
-- **Gemini:** concatenates `global/AGENT.md` + `group/AGENT.md` → writes `GEMINI.md`
+- **Gemini (ADK):** reads `AGENT.md` directly, parses specialist sub-agents from `## Specialists` section
+- **Gemini (CLI fallback):** concatenates `global/AGENT.md` + `group/AGENT.md` → writes `GEMINI.md`
 
 ## Skills
 

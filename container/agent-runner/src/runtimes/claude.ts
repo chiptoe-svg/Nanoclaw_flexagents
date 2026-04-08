@@ -232,6 +232,7 @@ async function runClaudeQuery(
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
+      settings: containerInput.model ? { model: containerInput.model } : undefined,
       settingSources: ['project', 'user'],
       mcpServers: getMcpServerConfig(mcpServerPath, containerInput),
       hooks: {

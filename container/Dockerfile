@@ -30,8 +30,11 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Install Python for Google ADK (Gemini runtime)
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv && rm -rf /var/lib/apt/lists/*
+
 # Install shared tools globally. SDK CLIs are added by /add-agentSDK-* skills.
-RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex
 
 # Create app directory
 WORKDIR /app
@@ -44,6 +47,11 @@ RUN npm install
 
 # Copy source code
 COPY agent-runner/ ./
+
+# Install ADK in a virtual environment (avoids system package conflicts)
+RUN python3 -m venv /opt/adk-venv && \
+    /opt/adk-venv/bin/pip install --no-cache-dir -r adk/requirements.txt
+ENV PATH="/opt/adk-venv/bin:$PATH"
 
 # Build TypeScript
 RUN npm run build

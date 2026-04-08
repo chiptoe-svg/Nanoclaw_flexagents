@@ -63,7 +63,7 @@ export const AVAILABLE_MODELS: Record<
   string,
   Array<{ id: string; name: string }>
 > = {
-  openai: [
+  codex: [
     { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini — fast, light quota' },
     { id: 'gpt-5.2', name: 'GPT-5.2 — general purpose' },
     { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex — tool/code focused' },
@@ -80,23 +80,10 @@ export const AVAILABLE_MODELS: Record<
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash — balanced' },
     { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite — fast/free' },
   ],
-  // Local models via OMLX (direct, no LiteLLM needed).
-  // Requires OMLX running: brew services start omlx
-  local: [
-    { id: 'mlx-community/Llama-3.1-8B-Instruct', name: 'Llama 3.1 8B (local)' },
-    { id: 'mlx-community/Qwen2.5-7B-Instruct', name: 'Qwen 2.5 7B (local)' },
-    {
-      id: 'mlx-community/DeepSeek-R1-0528-Qwen3-8B',
-      name: 'DeepSeek R1 8B (local)',
-    },
-  ],
-  // Custom models via LiteLLM. Requires LITELLM_URL in .env.
-  custom: [
-    {
-      id: 'huggingface/meta-llama/Llama-3.1-70B-Instruct',
-      name: 'Llama 3.1 70B (HuggingFace)',
-    },
-  ],
+  // Local models (OMLX, Ollama) — populated by /add-model-endpoint
+  local: [],
+  // Custom models (LiteLLM, remote endpoints) — populated by /add-model-endpoint
+  custom: [],
 };
 
 export const OMLX_URL = process.env.OMLX_URL || 'http://localhost:8000/v1';

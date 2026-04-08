@@ -34,7 +34,9 @@ All SDKs run inside the same container image. The agent-runner detects the runti
 | `container/agent-runner/src/runtime-registry.ts` | Container-side SDK dispatch |
 | `container/agent-runner/src/runtimes/claude.ts` | Claude SDK query loop |
 | `container/agent-runner/src/runtimes/codex.ts` | Codex SDK query loop |
-| `container/agent-runner/src/runtimes/gemini.ts` | Gemini CLI query loop |
+| `container/agent-runner/src/runtimes/gemini.ts` | Gemini ADK runtime |
+| `container/agent-runner/adk/nanoclaw_agent/` | ADK agent definition (Python) |
+| `container/agent-runner/src/specialist-runner.ts` | Specialist subagent dispatch |
 | `container/agent-runner/src/shared.ts` | Shared container plumbing (IO, IPC, MessageStream) |
 | `container/agent-runner/src/ipc-mcp-stdio.ts` | MCP server for NanoClaw IPC tools |
 | `container/skills/` | Skills loaded inside agent containers |
@@ -76,7 +78,7 @@ Telegram commands:
 Inside the container, the agent-runner assembles the final instructions:
 - **Codex:** concatenates `global/AGENT.md` + `group/AGENT.md` → writes `AGENTS.md`
 - **Claude:** copies `AGENT.md` → `CLAUDE.md` for SDK discovery, injects global via system prompt
-- **Gemini:** concatenates `global/AGENT.md` + `group/AGENT.md` → writes `GEMINI.md`
+- **Gemini (ADK):** reads `AGENT.md` directly, parses specialist sub-agents from `## Specialists` section
 
 ## Skills
 

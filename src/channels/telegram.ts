@@ -324,8 +324,9 @@ export class TelegramChannel implements Channel {
 
       if (args.length === 0) {
         const runtimeModels = AVAILABLE_MODELS[runtime] || [];
-        const localModels = AVAILABLE_MODELS['local'] || [];
-        const customModels = LITELLM_URL
+        // Local and custom models only work via Codex's baseUrl routing
+        const localModels = runtime === 'codex' ? AVAILABLE_MODELS['local'] || [] : [];
+        const customModels = runtime === 'codex' && LITELLM_URL
           ? AVAILABLE_MODELS['custom'] || []
           : [];
         const baseUrl = group.containerConfig?.baseUrl;
@@ -388,6 +389,15 @@ export class TelegramChannel implements Channel {
       const isCustomModel = (AVAILABLE_MODELS['custom'] || []).some(
         (m) => m.id === target,
       );
+
+      // Local and custom models only work via Codex's baseUrl routing
+      if ((isLocalModel || isCustomModel) && runtime !== 'codex') {
+        ctx.reply(
+          `Local/custom models require the Codex runtime. This group uses *${runtime}*.\nSwitch runtime first, or pick a ${runtime} model.`,
+          { parse_mode: 'Markdown' },
+        );
+        return;
+      }
 
       const config = group.containerConfig || {};
       config.model = target;

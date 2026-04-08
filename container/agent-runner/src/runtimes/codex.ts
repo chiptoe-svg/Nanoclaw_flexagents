@@ -81,6 +81,8 @@ args = ["${mcpServerPath}"]
 NANOCLAW_CHAT_JID = "${containerInput.chatJid}"
 NANOCLAW_GROUP_FOLDER = "${containerInput.groupFolder}"
 NANOCLAW_IS_MAIN = "${containerInput.isMain ? '1' : '0'}"
+NANOCLAW_RUNTIME = "codex"
+NANOCLAW_MODEL = "${containerInput.model || 'gpt-5.4-mini'}"
 `;
     fs.writeFileSync(configTomlPath, existingConfig + mcpConfig);
     log('Wrote NanoClaw MCP config to Codex config.toml');
@@ -113,7 +115,20 @@ NANOCLAW_IS_MAIN = "${containerInput.isMain ? '1' : '0'}"
     additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
   };
 
-  const thread = codex.startThread(threadOptions);
+  // Try resuming a previous thread if we have a session ID.
+  // Fall back to a fresh thread if resume fails (e.g. "no rollout found").
+  let thread;
+  if (sessionId) {
+    try {
+      thread = codex.resumeThread(sessionId, threadOptions);
+      log(`Resuming Codex thread: ${sessionId}`);
+    } catch (err) {
+      log(`Resume failed (${err instanceof Error ? err.message : String(err)}), starting fresh thread`);
+      thread = codex.startThread(threadOptions);
+    }
+  } else {
+    thread = codex.startThread(threadOptions);
+  }
 
   let closedDuringQuery = false;
   let newSessionId: string | undefined;

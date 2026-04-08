@@ -1,14 +1,13 @@
 /**
- * Google Gemini CLI runtime for the container agent-runner.
+ * Google Gemini runtime for the container agent-runner.
  * Self-registers with the container runtime registry.
  *
- * Uses Gemini CLI with --output-format stream-json for structured
- * streaming events. Captures tool calls, file changes, and reasoning
- * for logging and archiving.
+ * Uses Google ADK (Agent Development Kit) — a Python FastAPI sidecar
+ * that handles reasoning, tool calling, sub-agents, and session state.
  */
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 
 import {
   ContainerInput,
@@ -22,7 +21,159 @@ import {
 } from '../shared.js';
 import { registerContainerRuntime, type QueryResult } from '../runtime-registry.js';
 
-// --- Gemini query ---
+// --- ADK server management ---
+
+const ADK_PORT = 8765;
+const ADK_HOST = '127.0.0.1';
+const ADK_BASE = `http://${ADK_HOST}:${ADK_PORT}`;
+const ADK_APP = 'nanoclaw_agent';
+const ADK_USER = 'default';
+
+let adkProcess: ChildProcess | null = null;
+
+async function startAdkServer(containerInput: ContainerInput, mcpServerPath: string): Promise<void> {
+  if (adkProcess) return;
+
+  const adkAgentDir = '/app/adk';
+  if (!fs.existsSync(path.join(adkAgentDir, ADK_APP, '__init__.py'))) {
+    throw new Error('ADK agent not found at /app/adk/nanoclaw_agent/. Rebuild the container image.');
+  }
+
+  const model = containerInput.model || 'gemini-2.5-flash';
+  log(`Starting ADK server on port ${ADK_PORT} (model: ${model})`);
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    NANOCLAW_MODEL: model,
+    NANOCLAW_MCP_SERVER: mcpServerPath,
+    NANOCLAW_CHAT_JID: containerInput.chatJid,
+    NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+    NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+    NANOCLAW_WORKSPACE: '/workspace/group',
+  };
+
+  if (process.env.GEMINI_API_KEY) env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+  if (process.env.GOOGLE_API_KEY) env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+  if (containerInput.baseUrl) env.GOOGLE_GEMINI_BASE_URL = containerInput.baseUrl;
+
+  adkProcess = spawn('adk', [
+    'api_server',
+    '--host', ADK_HOST,
+    '--port', String(ADK_PORT),
+    '--session_service_uri', 'sqlite:///workspace/group/.adk-sessions.db',
+    '--auto_create_session',
+    adkAgentDir,
+  ], {
+    cwd: '/workspace/group',
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  adkProcess.stdout?.on('data', (chunk: Buffer) => {
+    for (const line of chunk.toString().trim().split('\n')) {
+      if (line) log(`[adk] ${line}`);
+    }
+  });
+
+  adkProcess.stderr?.on('data', (chunk: Buffer) => {
+    for (const line of chunk.toString().trim().split('\n')) {
+      if (line) log(`[adk] ${line}`);
+    }
+  });
+
+  adkProcess.on('close', (code) => {
+    log(`ADK server exited with code ${code}`);
+    adkProcess = null;
+  });
+
+  const ready = await waitForHealth(15_000);
+  if (!ready) {
+    adkProcess?.kill();
+    adkProcess = null;
+    throw new Error('ADK server failed to start. Check that google-adk is installed in the container.');
+  }
+
+  log('ADK server ready');
+}
+
+async function waitForHealth(timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${ADK_BASE}/health`);
+      if (res.ok) return true;
+    } catch {
+      // Not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+// --- ADK query ---
+
+async function runAdkQuery(
+  prompt: string,
+  sessionId: string | undefined,
+): Promise<{ resultText: string | null; toolCalls: string[]; newSessionId?: string }> {
+  let sid = sessionId;
+  if (!sid) {
+    const res = await fetch(
+      `${ADK_BASE}/apps/${ADK_APP}/users/${ADK_USER}/sessions`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    );
+    if (!res.ok) throw new Error(`Failed to create ADK session: ${res.status}`);
+    const data = await res.json() as { id?: string; session_id?: string };
+    sid = data.id || data.session_id;
+    log(`ADK session created: ${sid}`);
+  }
+
+  if (!sid) throw new Error('Failed to create ADK session');
+
+  const res = await fetch(`${ADK_BASE}/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      app_name: ADK_APP,
+      user_id: ADK_USER,
+      session_id: sid,
+      new_message: {
+        role: 'user',
+        parts: [{ text: prompt }],
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`ADK /run failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const events = await res.json() as Array<{
+    author?: string;
+    content?: { role?: string; parts?: Array<{ text?: string; function_call?: { name: string } }> };
+  }>;
+
+  let resultText: string | null = null;
+  const toolCalls: string[] = [];
+
+  for (const event of events) {
+    if (!event.content?.parts) continue;
+    for (const part of event.content.parts) {
+      if (part.function_call) {
+        toolCalls.push(`Tool: ${part.function_call.name}`);
+        log(`[adk-tool] ${part.function_call.name}`);
+      }
+      if (part.text && event.content.role === 'model') {
+        resultText = (resultText || '') + part.text;
+      }
+    }
+  }
+
+  return { resultText, toolCalls, newSessionId: sid };
+}
+
+// --- Main entry point ---
 
 async function runGeminiQuery(
   prompt: string,
@@ -30,58 +181,20 @@ async function runGeminiQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
 ): Promise<QueryResult> {
-  // Assemble GEMINI.md from global + group AGENT.md files
-  const agentsParts: string[] = [];
-  for (const dir of ['/workspace/global', '/workspace/group']) {
-    for (const filename of ['AGENT.md', 'GEMINI.md', 'CLAUDE.md']) {
-      const filePath = path.join(dir, filename);
-      if (fs.existsSync(filePath)) {
-        agentsParts.push(fs.readFileSync(filePath, 'utf-8'));
-        break;
-      }
-    }
-  }
-  if (agentsParts.length > 0) {
-    fs.writeFileSync(
-      '/workspace/group/GEMINI.md',
-      agentsParts.join('\n\n---\n\n'),
-    );
-    log(`Assembled GEMINI.md from ${agentsParts.length} source(s)`);
-  }
-
-  // Write MCP server config for Gemini CLI
-  const geminiConfigDir = path.join(process.env.HOME || '/home/node', '.gemini');
-  fs.mkdirSync(geminiConfigDir, { recursive: true });
-  const settingsPath = path.join(geminiConfigDir, 'settings.json');
-
-  let settings: Record<string, unknown> = {};
-  if (fs.existsSync(settingsPath)) {
-    try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { settings = {}; }
-  }
-  if (!settings.mcpServers || !(settings.mcpServers as Record<string, unknown>).nanoclaw) {
-    settings.mcpServers = {
-      ...(settings.mcpServers as Record<string, unknown> || {}),
-      nanoclaw: {
-        command: 'node',
-        args: [mcpServerPath],
-        env: {
-          NANOCLAW_CHAT_JID: containerInput.chatJid,
-          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-        },
-      },
-    };
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    log('Wrote NanoClaw MCP config to Gemini settings.json');
-  }
-
-  // Discover additional directories
-  const extraDirs: string[] = [];
+  // Symlink additional directories into the working directory
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
       const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) extraDirs.push(fullPath);
+      const linkPath = path.join('/workspace/group', `_extra_${entry}`);
+      if (fs.statSync(fullPath).isDirectory() && !fs.existsSync(linkPath)) {
+        try {
+          fs.symlinkSync(fullPath, linkPath);
+          log(`Symlinked extra dir: ${entry} → ${linkPath}`);
+        } catch (err) {
+          log(`Failed to symlink ${entry}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
   }
 
@@ -101,9 +214,11 @@ async function runGeminiQuery(
   setTimeout(pollIpc, 500);
 
   try {
-    const { resultText, toolCalls } = await runGeminiStreaming(prompt, model);
+    await startAdkServer(containerInput, mcpServerPath);
 
-    // Rich conversation archive with tool activity
+    const { resultText, toolCalls, newSessionId } = await runAdkQuery(prompt, sessionId);
+
+    // Archive conversation
     const archiveMessages: ParsedMessage[] = [
       { role: 'user', content: prompt },
     ];
@@ -134,7 +249,7 @@ async function runGeminiQuery(
       }
     }
 
-    writeOutput({ status: 'success', result: resultText, newSessionId: undefined });
+    writeOutput({ status: 'success', result: resultText, newSessionId });
 
     // Post-turn follow-ups
     ipcPolling = false;
@@ -143,9 +258,9 @@ async function runGeminiQuery(
       log(`Processing ${pendingMessages.length} IPC message(s) that arrived during turn`);
       const followUp = pendingMessages.join('\n');
       try {
-        const followUpResult = await runGeminiStreaming(followUp, model);
+        const followUpResult = await runAdkQuery(followUp, newSessionId);
         if (followUpResult.resultText) {
-          writeOutput({ status: 'success', result: followUpResult.resultText, newSessionId: undefined });
+          writeOutput({ status: 'success', result: followUpResult.resultText, newSessionId });
         }
       } catch (err) {
         log(`Follow-up error: ${err instanceof Error ? err.message : String(err)}`);
@@ -158,168 +273,12 @@ async function runGeminiQuery(
   }
 
   ipcPolling = false;
+  if (adkProcess) {
+    adkProcess.kill('SIGTERM');
+    adkProcess = null;
+  }
+
   return { newSessionId: undefined, closedDuringQuery };
-}
-
-// --- Streaming CLI execution with JSON event parsing ---
-
-function runGeminiStreaming(
-  prompt: string,
-  model: string,
-): Promise<{ resultText: string | null; toolCalls: string[] }> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-p', prompt,
-      '--yolo',
-      '--model', model,
-      '--output-format', 'stream-json',
-    ];
-
-    log(`Running: gemini --model ${model} --output-format stream-json`);
-
-    const proc = spawn('gemini', args, {
-      cwd: '/workspace/group',
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let resultText: string | null = null;
-    const toolCalls: string[] = [];
-    let stderr = '';
-    let jsonBuffer = '';
-
-    // Parse streaming JSON events from stdout
-    proc.stdout.on('data', (chunk: Buffer) => {
-      jsonBuffer += chunk.toString();
-
-      // Split by newlines — each line is a JSON event
-      const lines = jsonBuffer.split('\n');
-      jsonBuffer = lines.pop() || ''; // keep incomplete last line in buffer
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          processEvent(event, toolCalls);
-
-          // Capture final text content
-          if (event.type === 'content' && event.value) {
-            resultText = (resultText || '') + event.value;
-          }
-          // Also check for message/text patterns
-          if (event.text) {
-            resultText = event.text;
-          }
-          if (event.type === 'result' && event.content) {
-            resultText = event.content;
-          }
-        } catch {
-          // Not JSON — might be raw text output
-          if (line.trim() && !line.startsWith('{')) {
-            resultText = (resultText || '') + line;
-          }
-        }
-      }
-    });
-
-    proc.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      // Parse stderr for tool activity (fallback if JSON doesn't capture it)
-      for (const stderrLine of text.trim().split('\n')) {
-        if (!stderrLine) continue;
-        if (stderrLine.includes('Running:') || stderrLine.includes('Executing:')) {
-          const toolInfo = stderrLine.trim();
-          log(`[tool] ${toolInfo}`);
-          toolCalls.push(toolInfo);
-        } else if (stderrLine.includes('Reading') || stderrLine.includes('Writing') || stderrLine.includes('Searching')) {
-          log(`[tool] ${stderrLine.trim()}`);
-          toolCalls.push(stderrLine.trim());
-        } else {
-          log(`[gemini] ${stderrLine}`);
-        }
-      }
-    });
-
-    const timeout = setTimeout(() => {
-      proc.kill('SIGTERM');
-      reject(new Error('Gemini CLI timed out after 120s'));
-    }, 120_000);
-
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-
-      // Process any remaining buffer
-      if (jsonBuffer.trim()) {
-        try {
-          const event = JSON.parse(jsonBuffer);
-          processEvent(event, toolCalls);
-          if (event.type === 'content' && event.value) {
-            resultText = (resultText || '') + event.value;
-          }
-          if (event.text) resultText = event.text;
-        } catch {
-          if (jsonBuffer.trim() && !resultText) {
-            resultText = jsonBuffer.trim();
-          }
-        }
-      }
-
-      if (code !== 0 && !resultText) {
-        reject(new Error(`Gemini CLI exited with code ${code}: ${stderr.slice(-200)}`));
-        return;
-      }
-
-      resolve({ resultText, toolCalls });
-    });
-
-    proc.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
-}
-
-// --- Event processing ---
-
-function processEvent(event: Record<string, unknown>, toolCalls: string[]): void {
-  const type = event.type as string;
-
-  if (type === 'tool_call_request' || type === 'toolCallRequest') {
-    const value = event.value as Record<string, unknown> | undefined;
-    const name = value?.name || value?.tool || 'unknown';
-    log(`[tool] Call: ${name}`);
-    toolCalls.push(`Tool: ${name}`);
-  }
-
-  if (type === 'tool_call_response' || type === 'toolCallResponse') {
-    const value = event.value as Record<string, unknown> | undefined;
-    const name = value?.name || 'unknown';
-    const output = value?.output || value?.result;
-    const outputStr = typeof output === 'string' ? output.slice(0, 200) : JSON.stringify(output)?.slice(0, 200);
-    log(`[tool] Result: ${name} → ${outputStr}`);
-    if (outputStr) toolCalls.push(`${name}: ${outputStr}`);
-  }
-
-  if (type === 'thought') {
-    const value = event.value as Record<string, unknown> | undefined;
-    const text = value?.text || value?.summary || '';
-    if (text) log(`[thought] ${String(text).slice(0, 100)}`);
-  }
-
-  if (type === 'finished') {
-    const value = event.value as Record<string, unknown> | undefined;
-    const usage = value?.usageMetadata as Record<string, number> | undefined;
-    if (usage) {
-      log(`Gemini usage: ${usage.promptTokenCount || 0} in, ${usage.candidatesTokenCount || 0} out`);
-    }
-  }
-
-  if (type === 'error') {
-    const value = event.value as Record<string, unknown> | undefined;
-    const error = value?.error || value?.message || 'unknown error';
-    log(`[error] ${String(error).slice(0, 200)}`);
-  }
 }
 
 // --- Self-register ---
