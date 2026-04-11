@@ -62,6 +62,15 @@ ENV PATH="/opt/adk-venv/bin:$PATH"
 # Build TypeScript
 RUN npm run build
 
+# Disable Codex's internal Landlock sandbox — Docker is already the sandbox.
+# Wrap the binary to inject --dangerously-bypass-approvals-and-sandbox and
+# strip --sandbox/--approval flags that the SDK adds (they conflict with bypass).
+RUN for CODEX_BIN in $(find /usr/local/lib/node_modules/@openai/codex /app/node_modules/@openai/codex-linux-* -name "codex" -type f 2>/dev/null); do \
+      mv "$CODEX_BIN" "${CODEX_BIN}.real" && \
+      printf '#!/bin/sh\n# Strip --sandbox and -a/--ask-for-approval flags, add bypass\nARGS=""\nSKIP_NEXT=""\nfor arg in "$@"; do\n  if [ -n "$SKIP_NEXT" ]; then SKIP_NEXT=""; continue; fi\n  case "$arg" in\n    --sandbox|--ask-for-approval|-a) SKIP_NEXT=1; continue ;;\n    --dangerously-bypass-approvals-and-sandbox) continue ;;\n  esac\n  ARGS="$ARGS \\"$arg\\""\ndone\neval exec "%s.real" --dangerously-bypass-approvals-and-sandbox $ARGS\n' "$CODEX_BIN" > "$CODEX_BIN" && \
+      chmod +x "$CODEX_BIN"; \
+    done
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 

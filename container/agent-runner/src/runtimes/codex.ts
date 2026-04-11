@@ -72,6 +72,13 @@ async function runCodexQuery(
   }
   if (!existingConfig.includes('[mcp_servers.nanoclaw]')) {
     const mcpConfig = `
+# Disable bwrap sandbox — container is already sandboxed by Docker
+[features]
+use_linux_sandbox_bwrap = false
+
+[sandbox_workspace_write]
+network_access = true
+
 [mcp_servers.nanoclaw]
 type = "stdio"
 command = "node"
@@ -128,12 +135,18 @@ SILENT = "1"
   const codex = new Codex({
     apiKey: process.env.OPENAI_API_KEY,
     baseUrl: containerInput.baseUrl || process.env.OPENAI_BASE_URL,
+    config: {
+      // Disable bwrap sandbox — container is already sandboxed by Docker
+      features: { use_linux_sandbox_bwrap: false },
+      sandbox_workspace_write: { network_access: true },
+    },
   });
 
   const threadOptions = {
     model: containerInput.model || 'gpt-5.4-mini',
     workingDirectory: '/workspace/group',
-    sandboxMode: 'workspace-write' as const,
+    sandboxMode: 'danger-full-access' as const,
+    networkAccessEnabled: true,
     approvalPolicy: 'never' as const,
     skipGitRepoCheck: true,
     additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
