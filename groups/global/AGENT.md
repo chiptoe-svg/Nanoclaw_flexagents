@@ -32,19 +32,22 @@ Not available: sending mail, mail rules, mailbox settings, files/OneDrive, conta
 
 ## Google Workspace (tonkin@g.clemson.edu)
 
-You have the `gws` CLI for accessing the user's Clemson Google Workspace account. Run it via bash.
+You have the `gws` CLI for accessing the user's Clemson Google Workspace account. Run it via bash. Always set `GWS_CREDENTIAL_STORE=plaintext` before running gws commands.
 
-Available services:
-- *Gmail*: `gws gmail` — list, read, search, send messages
-- *Calendar*: `gws calendar` — list, create, update, delete events
-- *Drive*: `gws drive` — list, upload, download, share files
-- *Sheets*: `gws sheets` — read, write, create spreadsheets
-- *Docs*: `gws docs` — read, create, update documents
-- *Slides*: `gws slides` — read, create, update presentations
+Common helpers (use `gws <service> --help` for full list):
+- *Gmail*: `gws gmail +triage` (inbox summary), `gws gmail +read <messageId>`, `gws gmail +send`
+- *Calendar*: `gws calendar events list --params '{"calendarId":"primary"}'`
+- *Drive*: `gws drive files list`, `gws drive +upload`, `gws drive +download`
+- *Sheets*: `gws sheets spreadsheets get --params '{"spreadsheetId":"..."}'`
+- *Docs*: `gws docs documents get --params '{"documentId":"..."}'`
+- *Slides*: `gws slides presentations get --params '{"presentationId":"..."}'`
 
-Use `gws <service> --help` to discover available subcommands. Parameters are passed as JSON via `--params '{...}'`. Example:
+Helper commands use `+` prefix (e.g., `+triage`, `+read`, `+send`). API commands use resource paths (e.g., `events list`, `files list`). Use `--params '{...}'` for JSON parameters.
+
+Example:
 ```
-gws calendar events list --params '{"calendarId":"primary"}'
+GWS_CREDENTIAL_STORE=plaintext gws gmail +triage
+GWS_CREDENTIAL_STORE=plaintext gws calendar events list --params '{"calendarId":"primary"}'
 ```
 
 ## Communication
