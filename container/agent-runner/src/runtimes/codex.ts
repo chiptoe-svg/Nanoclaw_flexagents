@@ -10,6 +10,8 @@ import {
   ContainerInput,
   drainIpcInput,
   formatTranscriptMarkdown,
+  getContainerBaseUrl,
+  getContainerModel,
   log,
   ParsedMessage,
   sanitizeFilename,
@@ -39,16 +41,8 @@ async function runCodexQuery(
   containerInput: ContainerInput,
 ): Promise<QueryResult> {
   const runtimeOptions = containerInput.runtimeOptions || {};
-  const modelRef =
-    typeof runtimeOptions.modelRef === 'string'
-      ? runtimeOptions.modelRef
-      : typeof runtimeOptions.model === 'string'
-        ? runtimeOptions.model
-        : containerInput.model || 'gpt-5.4-mini';
-  const baseUrl =
-    typeof runtimeOptions.baseUrl === 'string'
-      ? runtimeOptions.baseUrl
-      : containerInput.baseUrl || process.env.OPENAI_BASE_URL;
+  const modelRef = getContainerModel(containerInput, 'gpt-5.4-mini');
+  const baseUrl = getContainerBaseUrl(containerInput) || process.env.OPENAI_BASE_URL;
   const sandboxProfile =
     runtimeOptions.sandboxProfile === 'operator' ? 'operator' : 'safe';
 

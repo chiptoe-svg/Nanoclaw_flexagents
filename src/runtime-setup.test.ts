@@ -176,8 +176,9 @@ describe('runtime-setup', () => {
 
       expect(mount.hostPath).toBe('/data/sessions/test-group/.codex');
       expect(mount.containerPath).toBe('/home/node/.codex');
-      const codexWrites = fsMock.writeFileSync.mock.calls
-        .filter((args) => String(args[0]).includes('/data/sessions/test-group/.codex/'));
+      const codexWrites = fsMock.writeFileSync.mock.calls.filter((args) =>
+        String(args[0]).includes('/data/sessions/test-group/.codex/'),
+      );
       expect(codexWrites).toHaveLength(0);
     });
 

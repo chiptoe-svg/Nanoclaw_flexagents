@@ -56,9 +56,7 @@ export class CodexRuntime implements AgentRuntime {
     };
   }
 
-  async preflight(
-    config: AgentRuntimeConfig,
-  ): Promise<RuntimePreflightResult> {
+  async preflight(config: AgentRuntimeConfig): Promise<RuntimePreflightResult> {
     const resolvedOptions = resolveCodexRuntimeOptions(
       config.group,
       config.runtimeOptions,
@@ -67,7 +65,9 @@ export class CodexRuntime implements AgentRuntime {
     const warnings: string[] = [];
 
     if (config.runtimeOptions?.model && config.runtimeOptions?.modelRef) {
-      warnings.push('Codex runtimeOptions received both model and modelRef; modelRef wins.');
+      warnings.push(
+        'Codex runtimeOptions received both model and modelRef; modelRef wins.',
+      );
     }
 
     if (

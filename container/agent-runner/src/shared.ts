@@ -39,6 +39,36 @@ export interface ContainerOutput {
   error?: string;
 }
 
+function runtimeOptionString(
+  containerInput: ContainerInput,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = containerInput.runtimeOptions?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+export function getContainerModel(
+  containerInput: ContainerInput,
+  fallback = '',
+): string {
+  return (
+    runtimeOptionString(containerInput, 'modelRef', 'model') ||
+    containerInput.model ||
+    fallback
+  );
+}
+
+export function getContainerBaseUrl(
+  containerInput: ContainerInput,
+): string | undefined {
+  return runtimeOptionString(containerInput, 'baseUrl') || containerInput.baseUrl;
+}
+
 export interface ScriptResult {
   wakeAgent: boolean;
   data?: unknown;
@@ -297,12 +327,7 @@ export function getMcpServerConfig(
   mcpServerPath: string,
   containerInput: ContainerInput,
 ) {
-  const modelRef =
-    typeof containerInput.runtimeOptions?.modelRef === 'string'
-      ? containerInput.runtimeOptions.modelRef
-      : typeof containerInput.runtimeOptions?.model === 'string'
-        ? containerInput.runtimeOptions.model
-        : containerInput.model || '';
+  const modelRef = getContainerModel(containerInput);
 
   const config: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
     nanoclaw: {

@@ -13,6 +13,8 @@ import {
   ContainerInput,
   drainIpcInput,
   formatTranscriptMarkdown,
+  getContainerBaseUrl,
+  getContainerModel,
   log,
   ParsedMessage,
   sanitizeFilename,
@@ -40,7 +42,7 @@ async function startAdkServer(containerInput: ContainerInput, mcpServerPath: str
     throw new Error('ADK agent not found at /app/adk/nanoclaw_agent/. Rebuild the container image.');
   }
 
-  const model = containerInput.model || 'gemini-2.5-flash';
+  const model = getContainerModel(containerInput, 'gemini-2.5-flash');
   log(`Starting ADK server on port ${ADK_PORT} (model: ${model})`);
 
   const env: Record<string, string> = {
@@ -55,7 +57,8 @@ async function startAdkServer(containerInput: ContainerInput, mcpServerPath: str
 
   if (process.env.GEMINI_API_KEY) env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
   if (process.env.GOOGLE_API_KEY) env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-  if (containerInput.baseUrl) env.GOOGLE_GEMINI_BASE_URL = containerInput.baseUrl;
+  const baseUrl = getContainerBaseUrl(containerInput);
+  if (baseUrl) env.GOOGLE_GEMINI_BASE_URL = baseUrl;
 
   adkProcess = spawn('adk', [
     'api_server',
@@ -212,7 +215,7 @@ async function runGeminiQuery(
     }
   }
 
-  const model = containerInput.model || 'gemini-2.5-flash';
+  const model = getContainerModel(containerInput, 'gemini-2.5-flash');
   let closedDuringQuery = false;
 
   let ipcPolling = true;

@@ -109,7 +109,9 @@ function resolveHostPath(hostPath: string): string {
  * Get volume mounts for all providers whose token directories exist on the host.
  * Called by container-runner.ts to add provider-specific mounts.
  */
-export function getProviderMounts(): Array<{
+export function getProviderMounts(opts?: {
+  includeTokens?: boolean;
+}): Array<{
   hostPath: string;
   containerPath: string;
   readonly: boolean;
@@ -120,14 +122,16 @@ export function getProviderMounts(): Array<{
     readonly: boolean;
   }> = [];
 
-  for (const provider of loadProviders()) {
-    const hostDir = resolveHostPath(provider.tokenPaths.host);
-    if (fs.existsSync(hostDir)) {
-      mounts.push({
-        hostPath: hostDir,
-        containerPath: provider.tokenPaths.container,
-        readonly: provider.tokenPaths.readonly,
-      });
+  if (opts?.includeTokens) {
+    for (const provider of loadProviders()) {
+      const hostDir = resolveHostPath(provider.tokenPaths.host);
+      if (fs.existsSync(hostDir)) {
+        mounts.push({
+          hostPath: hostDir,
+          containerPath: provider.tokenPaths.container,
+          readonly: provider.tokenPaths.readonly,
+        });
+      }
     }
   }
 

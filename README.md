@@ -151,18 +151,24 @@ Responsibilities:
 - choose the runtime-specific home layout
 - sync skills into the per-group runtime home
 - resolve auth material through provider-neutral auth backends
+- load provider definitions from `~/.nanoclaw/providers/`
 - mount the group workspace, IPC directory, and runtime home into the container
+- selectively mount provider token directories when a container is allowed to use them
 
 The important distinction is:
 
 - the framework knows how to prepare a runtime home and launch a container
 - only a runtime or auth backend knows what credentials/options its provider needs
+- provider definitions are data-driven JSON files, but credential exposure is still controlled by the host launcher
+
+Codex has one extra wrinkle: it may use an inner sandbox based on user namespaces and bubblewrap inside the container. Because of that, the host launcher applies a small Codex-only container compatibility adjustment when needed. Claude and Gemini rely only on the outer container sandbox and do not receive the same relaxation.
 
 Core files:
 - `src/container-runner.ts` — container spawning, mounts, env injection
 - `src/runtime-setup.ts` — runtime home preparation
 - `src/auth/types.ts` — neutral auth backend contracts
 - `src/auth/backends.ts` — compatibility env/file backends plus future stubs
+- `src/provider-registry.ts` — host-side provider config loading and token mount discovery
 
 ### Layer 4: In-Container Agent Runner
 
@@ -172,11 +178,13 @@ Flow at this layer:
 
 1. The container agent-runner reads `ContainerInput`.
 2. The runtime registry selects the in-container runtime implementation.
-3. The runtime module talks to its SDK, streams output, and writes structured results back over stdout/IPC.
+3. The container-side provider registry enables only the provider MCP servers, docs, and init hooks whose token files are actually mounted into that container.
+4. The runtime module talks to its SDK, streams output, and writes structured results back over stdout/IPC.
 
 Core files:
 - `container/agent-runner/src/index.ts` — shared container entrypoint
 - `container/agent-runner/src/runtime-registry.ts` — in-container dispatch
+- `container/agent-runner/src/provider-registry.ts` — container-side provider discovery
 - `container/agent-runner/src/shared.ts` — shared IPC/output plumbing
 - `container/agent-runner/src/runtimes/claude.ts` — Claude SDK loop
 - `container/agent-runner/src/runtimes/codex.ts` — Codex SDK loop
@@ -189,6 +197,13 @@ Each group is isolated by folder, persona, memory, IPC namespace, and runtime ho
 - `groups/*/AGENT.md` — runtime-agnostic persona
 - `groups/*/memory/` — persistent memory and notes
 - `container/skills/` — shared skill source copied into runtime-specific homes
+
+Provider integrations follow the same pattern:
+
+- `container/providers/*.json` — built-in provider definitions shipped with the repo
+- `~/.nanoclaw/providers/*.json` — active host-side provider configs copied on startup
+- provider tokens stay on the host and are mounted into containers only when allowed by the launcher
+- the in-container provider registry turns mounted credentials into MCP servers, init hooks, allowed tools, and appended agent docs
 
 At startup or launch time, the system assembles the provider-specific instruction file a runtime expects:
 
@@ -217,6 +232,8 @@ Channel / Scheduler
 **Secure by isolation.** Agents run in Linux containers and can only see what's explicitly mounted.
 
 **Runtime-agnostic at the core.** The app shell stays provider-neutral, while SDK-specific behavior lives in runtime and container modules.
+
+**Provider-driven integrations.** External services are described as provider configs, but the host process still controls when credentials are mounted and which containers can see them.
 
 **Built for the individual.** Fork it, customize it, make it yours. The codebase is small enough to modify safely.
 
@@ -279,7 +296,7 @@ Yes. The project has persona files for all three: `CLAUDE.md` (Claude Code), `AG
 
 **How do I add a new external service (email provider, API, etc.)?**
 
-Drop a JSON file in `container/providers/`. It declares token paths, MCP server config, allowed tools, init hooks, and agent docs. The system picks it up automatically — no code changes needed. See `container/providers/ms365.json` as an example.
+Add a provider JSON file under `container/providers/`. On startup, NanoClaw copies built-in provider configs into `~/.nanoclaw/providers/` if they are missing. Each provider file declares token paths, MCP server config, allowed tools, init hooks, and agent docs. See `container/providers/ms365.json` as an example.
 
 **How do I debug issues?**
 

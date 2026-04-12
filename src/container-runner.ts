@@ -205,7 +205,13 @@ function buildVolumeMounts(
   // Provider-based token mounts (MS365, GWS, IMAP, etc.)
   // Each provider JSON in ~/.nanoclaw/providers/ declares its token paths.
   // Only mounts directories that exist on the host.
-  mounts.push(...getProviderMounts());
+  mounts.push(
+    ...getProviderMounts({
+      // Provider tokens are privileged credentials. Keep them scoped to the
+      // main/elevated group until per-group provider permissions are modeled.
+      includeTokens: isMain,
+    }),
+  );
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -249,8 +255,11 @@ function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
-  // Allow unprivileged user namespaces (needed by Codex's bubblewrap sandbox)
-  args.push('--security-opt', 'seccomp=unconfined');
+  if (runtime === 'codex') {
+    // Allow unprivileged user namespaces only for Codex, which may rely on
+    // bubblewrap/user-namespaces inside the container.
+    args.push('--security-opt', 'seccomp=unconfined');
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
