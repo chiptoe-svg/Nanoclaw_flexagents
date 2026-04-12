@@ -49,8 +49,7 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   runtime?: 'claude' | 'codex' | string;
-  model?: string;
-  baseUrl?: string;
+  runtimeOptions?: Record<string, unknown>;
 }
 
 export interface ContainerOutput {
@@ -73,6 +72,7 @@ function getRuntime(group: RegisteredGroup): string {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  runtimeOptions?: Record<string, unknown>,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -153,6 +153,7 @@ function buildVolumeMounts(
     runtime,
     groupSessionsBase: path.join(DATA_DIR, 'sessions', group.folder),
     projectRoot,
+    runtimeOptions,
   });
   mounts.push({ ...homeMount, readonly: false });
 
@@ -225,6 +226,7 @@ function buildContainerArgs(
   image: string,
   group: RegisteredGroup,
   runtime?: string,
+  runtimeOptions?: Record<string, unknown>,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -238,6 +240,7 @@ function buildContainerArgs(
     runtime: runtime || '',
     groupSessionsBase: path.join(DATA_DIR, 'sessions', group.folder),
     projectRoot: process.cwd(),
+    runtimeOptions,
   });
   for (const [key, value] of Object.entries(credEnv)) {
     args.push('-e', `${key}=${value}`);
@@ -283,7 +286,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.runtimeOptions);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const runtime = getRuntime(group);
@@ -294,6 +297,7 @@ export async function runContainerAgent(
     image,
     group,
     runtime,
+    input.runtimeOptions,
   );
 
   logger.debug(
