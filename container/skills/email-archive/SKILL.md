@@ -37,11 +37,33 @@ cat /workspace/group/email-archive/state/progress.yaml
 
 Parse into working variables:
 - From `email-accounts.yaml`: account id, type, address, enabled status
-- From `config.yaml`: archive_accounts (with folder_ids), batch_size, mode, taxonomy, thresholds
-- From `rules.yaml`: sender classification rules
+- From `config.yaml`: archive_accounts (with folder_ids), batch_size, mode, taxonomy, taxonomy_context, thresholds, age_rules
+- From `rules.yaml`: sender classification rules + llm_hints
 - From `progress.yaml`: per-account bookmark and stats
 
 Join accounts: for each entry in `config.yaml`'s `archive_accounts`, look up the account type from `email-accounts.yaml`.
+
+### Current Taxonomy
+
+The taxonomy is defined in `config.yaml`. Each category has context in `taxonomy_context` to guide LLM classification:
+
+| Category | Description |
+|----------|-------------|
+| Archive/SI-Development | Sonoco Institute development projects, equipment, systems |
+| Archive/SI-Operations | Sonoco Institute operations, scheduling, tours, events |
+| Archive/SI-Other | Sonoco Institute other/general |
+| Archive/GC-Development | Graphic Communications department development |
+| Archive/GC-Operations | Graphic Communications operations, admin |
+| Archive/GC-Curriculum | Graphic Communications curriculum, course design |
+| Archive/GC-Student | Graphic Communications student-related (internships, advising, registration) |
+| Archive/Classes | Course/class related (teaching, assignments, grades) |
+| Archive/Research | Research projects, papers, grants |
+| Archive/Industry | Industry contacts, partnerships, vendors, conferences |
+| Archive/University-Partners | Other universities, academic collaborations |
+| Archive/Personal | Personal correspondence |
+| Archive/Accounts | Service notifications, password resets, account confirmations |
+| Archive/Newsletters | Subscriptions, digests, mailing lists worth keeping |
+| To Delete | Spam, marketing, expired notifications, transient alerts |
 
 ---
 
@@ -92,12 +114,26 @@ Update status and self-pause if this is a scheduled task (`mcp__nanoclaw__pause_
 
 For each email in the batch:
 
-#### 2a. Check rules
+#### 2a. Check age rules
+
+Load `age_rules` from `config.yaml`. For each email, check if any age rule matches:
+
+- Match by `from_domain` or `from_address`
+- If the email is older than `max_age_days`, classify as "To Delete"
+- If `condition: "read_or_old"`, also classify as "To Delete" if the email has been read
+- Age rules override sender rules — they catch time-expired notifications
+
+Current age rules:
+- `adobesign@adobesign.com` → To Delete if read or older than 14 days
+- `drive-shares-dm-noreply@google.com` → To Delete if older than 30 days
+- `comments-noreply@docs.google.com` → To Delete if older than 30 days
+
+#### 2b. Check sender rules
 
 Load rules from `rules.yaml`. Check in priority order:
 
-1. **from_address** — exact sender match (e.g., `billing@aws.amazon.com`)
-2. **from_domain** — domain match (e.g., `github.com`)
+1. **from_address** — exact sender match (e.g., `quarantine@messaging.microsoft.com`)
+2. **from_domain** — domain match (e.g., `apriva.com`)
 3. **subject_contains** — keyword in subject line
 
 If a rule matches:
@@ -106,19 +142,24 @@ If a rule matches:
 - Increment the rule's `applied_count`
 - No LLM needed
 
-#### 2b. LLM classification (no rule matched)
+#### 2c. LLM classification (no rule matched)
 
 For unmatched emails, classify using your own judgment. Consider:
 - Sender address and domain
-- Subject line
-- The taxonomy categories from config.yaml
+- Subject line and body content
+- The `taxonomy_context` from config.yaml (descriptions of what each category means)
+- The `llm_hints` from rules.yaml (domain-level guidance)
 - The existing rules as examples of classification patterns
+
+LLM hints from rules.yaml:
+- Non-Clemson `.edu` addresses → likely `Archive/University-Partners`
+- `g.clemson.edu` / `clemson.edu` → classify by content (could be SI, GC, Classes, Research, Student — read the subject/body to decide)
 
 Produce a classification:
 ```
-folder: "Archive/Work"
+folder: "Archive/GC-Student"
 confidence: 0.85
-reason: "From clemson.edu address, subject about department meeting"
+reason: "From g.clemson.edu student address, subject about internship situation"
 ```
 
 If confidence < `thresholds.llm_confidence`: mark as `needs_review`.
@@ -135,21 +176,24 @@ Present ALL classifications for approval via `mcp__nanoclaw__send_message`:
 *Email Archive — Batch #N* (BATCH_SIZE emails, ACCOUNT_ID)
 
 *By rule* (N emails, no LLM cost):
-  Archive/Work: N
-  Archive/Accounts: N
-  To Delete: N
+  To Delete: N (quarantine, bitly, miro, etc.)
+  Archive/Industry: N (flexography, bobst)
+
+*By age rule* (N emails):
+  To Delete: N (expired google notifications, old adobesign)
 
 *By LLM* (N emails):
-  Archive/Work: N — "Meeting notes from john@example.com"
-  Archive/Personal: N — "Flight confirmation"
-  To Delete: N — "50% off sale from store@promo.com"
+  Archive/GC-Student: N — "Current Internship Situation" from dynastg@g.clemson.edu
+  Archive/SI-Operations: N — "Tour signup request" from ocarr@g.clemson.edu
+  Archive/GC-Curriculum: N — "GC 3800 Registration" from sbaier@g.clemson.edu
+  Archive/University-Partners: N — "Clemson Travel" from ctwomey@calpoly.edu
 
 *Needs your call* (N emails):
-  1. "Re: Project update" from unknown@random.com → Archive/Work? (0.65)
-  2. "Important notice" from legal@company.com → Archive/Work? (0.72)
+  1. "Re: Graduate Student Applications" from santigomez82@gmail.com → Archive/GC-Student? (0.65)
+  2. "Budget meeting" from emweise@clemson.edu → Archive/GC-Operations? (0.72)
 
 Reply *approve* to apply all, or correct items:
-  *1:Archive/Personal* to override item 1
+  *1:Archive/GC-Operations* to override item 1
   *reject* to skip this batch
 ```
 
@@ -199,13 +243,13 @@ Every 100 emails (check total stats), scan for overcrowded categories:
 
 If any category has 30+ emails and one sender domain accounts for 40%+ of that category:
 ```
-Archive/Work has 45 emails. Top senders:
-  - *@github.com: 15 emails
-  - *@clemson.edu: 12 emails
+Archive/GC-Student has 45 emails. Top senders:
+  - *@g.clemson.edu: 38 emails
+  - *@gmail.com: 7 emails
 
 Suggested subcategories:
-  - Archive/Work/Notifications (github)
-  - Archive/Work/University (clemson.edu)
+  - Archive/GC-Student/Internships
+  - Archive/GC-Student/Advising
 
 Want to create these? (Existing emails won't be re-filed — applies to future batches.)
 ```
@@ -227,11 +271,12 @@ Report:
 *Email Archive Status*
 
 *Accounts:*
-  ACCOUNT_ID (TYPE): N processed (status)
-  ACCOUNT_ID (TYPE): N processed (status)
+  gmail (gws): N processed (status)
+  outlook (ms365): N processed (status)
 
 *Classification:*
   Rule-matched: N (N% of total)
+  Age-rule matched: N
   LLM-classified: N
   Corrections: N (N% error rate)
 
@@ -239,9 +284,10 @@ Report:
 *Mode:* interactive / supervised / autonomous
 
 *Top folders:*
-  Archive/Work: N
   To Delete: N
-  Archive/Accounts: N
+  Archive/GC-Student: N
+  Archive/SI-Operations: N
+  Archive/Industry: N
 ```
 
 ---
