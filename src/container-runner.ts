@@ -6,6 +6,7 @@
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -29,6 +30,10 @@ import {
 import { validateAdditionalMounts } from './mount-security.js';
 import { getRuntimeSetup } from './runtime-setup.js';
 import { RegisteredGroup } from './types.js';
+
+function isExpectedContainerError(err: unknown): err is Error {
+  return err instanceof Error;
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -111,6 +116,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Global persona (read-only) — same as non-main groups
+    const globalDirMain = path.join(GROUPS_DIR, 'global');
+    if (fs.existsSync(globalDirMain)) {
+      mounts.push({
+        hostPath: globalDirMain,
+        containerPath: '/workspace/global',
+        readonly: true,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -157,7 +172,12 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
   const groupAgentRunnerDir = path.join(
     DATA_DIR,
     'sessions',
@@ -181,6 +201,26 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // MS365 token cache (if user has authenticated via `npm run ms365-login`)
+  const ms365TokenDir = path.join(os.homedir(), '.nanoclaw', '.ms365-tokens');
+  if (fs.existsSync(ms365TokenDir)) {
+    mounts.push({
+      hostPath: ms365TokenDir,
+      containerPath: '/workspace/.ms365-tokens',
+      readonly: false,
+    });
+  }
+
+  // Google Workspace CLI credentials (if user has authenticated via `gws auth login`)
+  const gwsTokenDir = path.join(os.homedir(), '.nanoclaw', '.gws-tokens');
+  if (fs.existsSync(gwsTokenDir)) {
+    mounts.push({
+      hostPath: gwsTokenDir,
+      containerPath: '/workspace/.gws-tokens',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -223,6 +263,9 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Allow unprivileged user namespaces (needed by Codex's bubblewrap sandbox)
+  args.push('--security-opt', 'seccomp=unconfined');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -361,6 +404,7 @@ export async function runContainerAgent(
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
+            if (!(err instanceof SyntaxError)) throw err;
             logger.warn(
               { group: group.name, error: err },
               'Failed to parse streamed output chunk',
@@ -408,6 +452,7 @@ export async function runContainerAgent(
       try {
         stopContainer(containerName);
       } catch (err) {
+        if (!isExpectedContainerError(err)) throw err;
         logger.warn(
           { group: group.name, containerName, err },
           'Graceful stop failed, force killing',
@@ -611,6 +656,7 @@ export async function runContainerAgent(
 
         resolve(output);
       } catch (err) {
+        if (!(err instanceof SyntaxError)) throw err;
         logger.error(
           {
             group: group.name,

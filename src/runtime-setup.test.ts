@@ -44,7 +44,9 @@ import { detectAuthMode } from './credential-proxy.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-function makeCtx(overrides?: Partial<RuntimeSetupContext>): RuntimeSetupContext {
+function makeCtx(
+  overrides?: Partial<RuntimeSetupContext>,
+): RuntimeSetupContext {
   return {
     group: {
       name: 'Test',
@@ -76,8 +78,13 @@ describe('runtime-setup', () => {
         if (p.includes('container/skills')) return true;
         return false;
       }) as typeof fsMock.existsSync);
-      fsMock.readdirSync.mockReturnValue(['wiki'] as unknown as ReturnType<typeof fsMock.readdirSync>);
-      fsMock.statSync.mockReturnValue({ isDirectory: () => true, mtimeMs: 0 } as unknown as ReturnType<typeof fsMock.statSync>);
+      fsMock.readdirSync.mockReturnValue(['wiki'] as unknown as ReturnType<
+        typeof fsMock.readdirSync
+      >);
+      fsMock.statSync.mockReturnValue({
+        isDirectory: () => true,
+        mtimeMs: 0,
+      } as unknown as ReturnType<typeof fsMock.statSync>);
 
       const mount = setup.prepareHome(makeCtx({ runtime: 'claude' }));
 
@@ -104,13 +111,13 @@ describe('runtime-setup', () => {
     it('does not overwrite existing settings.json', () => {
       const setup = getRuntimeSetup('claude');
       fsMock.existsSync.mockImplementation(((p: string) =>
-        p.endsWith('settings.json')
-      ) as typeof fsMock.existsSync);
+        p.endsWith('settings.json')) as typeof fsMock.existsSync);
 
       setup.prepareHome(makeCtx({ runtime: 'claude' }));
 
-      const settingsWrites = fsMock.writeFileSync.mock.calls
-        .filter((args) => String(args[0]).includes('settings.json'));
+      const settingsWrites = fsMock.writeFileSync.mock.calls.filter((args) =>
+        String(args[0]).includes('settings.json'),
+      );
       expect(settingsWrites).toHaveLength(0);
     });
 
@@ -187,8 +194,7 @@ describe('runtime-setup', () => {
     it('getCredentialEnv skips API key when subscription auth exists', () => {
       const setup = getRuntimeSetup('codex');
       fsMock.existsSync.mockImplementation(((p: string) =>
-        p.includes('auth.json')
-      ) as typeof fsMock.existsSync);
+        p.includes('auth.json')) as typeof fsMock.existsSync);
 
       const env = setup.getCredentialEnv(makeCtx({ runtime: 'codex' }));
 
@@ -198,7 +204,9 @@ describe('runtime-setup', () => {
     it('getCredentialEnv uses group baseUrl over env', () => {
       const setup = getRuntimeSetup('codex');
       fsMock.existsSync.mockReturnValue(false);
-      vi.mocked(readEnvFile).mockReturnValue({ OPENAI_BASE_URL: 'http://global' });
+      vi.mocked(readEnvFile).mockReturnValue({
+        OPENAI_BASE_URL: 'http://global',
+      });
 
       const ctx = makeCtx({ runtime: 'codex' });
       ctx.group.containerConfig = { baseUrl: 'http://per-group' };
@@ -214,8 +222,7 @@ describe('runtime-setup', () => {
     it('prepareHome creates .gemini dir with skills', () => {
       const setup = getRuntimeSetup('gemini');
       fsMock.existsSync.mockImplementation(((p: string) =>
-        p.includes('container/skills')
-      ) as typeof fsMock.existsSync);
+        p.includes('container/skills')) as typeof fsMock.existsSync);
       fsMock.readdirSync.mockReturnValue([]);
 
       const mount = setup.prepareHome(makeCtx({ runtime: 'gemini' }));
@@ -272,7 +279,9 @@ describe('runtime-setup', () => {
     it('getCredentialEnv returns empty and logs warning', () => {
       const setup = getRuntimeSetup('unknown-runtime');
 
-      const env = setup.getCredentialEnv(makeCtx({ runtime: 'unknown-runtime' }));
+      const env = setup.getCredentialEnv(
+        makeCtx({ runtime: 'unknown-runtime' }),
+      );
 
       expect(env).toEqual({});
       expect(logger.warn).toHaveBeenCalledWith(

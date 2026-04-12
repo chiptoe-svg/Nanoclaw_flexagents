@@ -81,7 +81,11 @@ function createMinimalHome(ctx: RuntimeSetupContext): HomeMount {
 
 const claudeSetup: RuntimeSetup = {
   prepareHome(ctx) {
-    const { homeDir, mount } = prepareHomeDir(ctx, '.claude', '/home/node/.claude');
+    const { homeDir, mount } = prepareHomeDir(
+      ctx,
+      '.claude',
+      '/home/node/.claude',
+    );
 
     // SDK settings — only written once (not overwritten on restart)
     const settingsFile = path.join(homeDir, 'settings.json');
@@ -142,7 +146,11 @@ const codexSetup: RuntimeSetup = {
       return createMinimalHome(ctx);
     }
 
-    const { homeDir, mount } = prepareHomeDir(ctx, '.codex', '/home/node/.codex');
+    const { homeDir, mount } = prepareHomeDir(
+      ctx,
+      '.codex',
+      '/home/node/.codex',
+    );
     materializeAuthMaterial(homeDir, material);
 
     // TODO: Enforce sandboxProfile-aware launch policy in container-runner once

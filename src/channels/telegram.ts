@@ -23,6 +23,7 @@ import { getRegisteredGroup, setRegisteredGroup } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
+import { transcribeAudio } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -36,6 +37,16 @@ export interface TelegramChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
+
+type TelegramMediaCtx = {
+  chat: { id: number; type: string; title?: string };
+  from?: { id?: number; first_name?: string; username?: string };
+  message: {
+    date: number;
+    message_id: number;
+    caption?: string;
+  };
+};
 
 /**
  * Send a message with Telegram Markdown parse mode, falling back to plain text.
@@ -137,7 +148,7 @@ export class TelegramChannel implements Channel {
       const chatName =
         chatType === 'private'
           ? ctx.from?.first_name || 'Private'
-          : (ctx.chat as any).title || 'Unknown';
+          : ('title' in ctx.chat ? ctx.chat.title : undefined) || 'Unknown';
 
       ctx.reply(
         `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
@@ -325,10 +336,12 @@ export class TelegramChannel implements Channel {
       if (args.length === 0) {
         const runtimeModels = AVAILABLE_MODELS[runtime] || [];
         // Local and custom models only work via Codex's baseUrl routing
-        const localModels = runtime === 'codex' ? AVAILABLE_MODELS['local'] || [] : [];
-        const customModels = runtime === 'codex' && LITELLM_URL
-          ? AVAILABLE_MODELS['custom'] || []
-          : [];
+        const localModels =
+          runtime === 'codex' ? AVAILABLE_MODELS['local'] || [] : [];
+        const customModels =
+          runtime === 'codex' && LITELLM_URL
+            ? AVAILABLE_MODELS['custom'] || []
+            : [];
         const baseUrl = group.containerConfig?.baseUrl;
 
         let reply = `Model: *${currentModel}*\nRuntime: ${runtime}`;
@@ -468,7 +481,7 @@ export class TelegramChannel implements Channel {
       const chatName =
         ctx.chat.type === 'private'
           ? senderName
-          : (ctx.chat as any).title || chatJid;
+          : ('title' in ctx.chat ? ctx.chat.title : undefined) || chatJid;
 
       // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
       // Telegram @mentions (e.g., @andy_ai_bot) won't match TRIGGER_PATTERN
@@ -534,7 +547,7 @@ export class TelegramChannel implements Channel {
 
     // Handle non-text messages: download files when possible, fall back to placeholders.
     const storeMedia = (
-      ctx: any,
+      ctx: TelegramMediaCtx,
       placeholder: string,
       opts?: { fileId?: string; filename?: string },
     ) => {
@@ -577,7 +590,7 @@ export class TelegramChannel implements Channel {
         const msgId = ctx.message.message_id.toString();
         const filename =
           opts.filename ||
-          `${placeholder.replace(/[\[\] ]/g, '').toLowerCase()}_${msgId}`;
+          `${placeholder.replace(/[[\] ]/g, '').toLowerCase()}_${msgId}`;
         this.downloadFile(opts.fileId, group.folder, filename).then(
           (filePath) => {
             if (filePath) {
@@ -609,10 +622,67 @@ export class TelegramChannel implements Channel {
       });
     });
     this.bot.on('message:voice', (ctx) => {
-      storeMedia(ctx, '[Voice message]', {
-        fileId: ctx.message.voice?.file_id,
-        filename: `voice_${ctx.message.message_id}`,
-      });
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const fileId = ctx.message.voice?.file_id;
+      if (!fileId) {
+        storeMedia(ctx, '[Voice message]');
+        return;
+      }
+
+      const filename = `voice_${ctx.message.message_id}`;
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      this.downloadFile(fileId, group.folder, filename).then(
+        async (filePath) => {
+          let content: string;
+          if (filePath) {
+            // Resolve the actual host path for transcription
+            const groupDir = resolveGroupFolderPath(group.folder);
+            const localFile = path.join(
+              groupDir,
+              'attachments',
+              path.basename(filePath),
+            );
+            const transcript = await transcribeAudio(localFile);
+            if (transcript) {
+              content = `[Voice: ${transcript}]${caption}`;
+            } else {
+              content = `[Voice message] (${filePath})${caption}`;
+            }
+          } else {
+            content = `[Voice message]${caption}`;
+          }
+
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content,
+            timestamp,
+            is_from_me: false,
+          });
+        },
+      );
     });
     this.bot.on('message:audio', (ctx) => {
       const name =
