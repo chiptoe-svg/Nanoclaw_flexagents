@@ -126,9 +126,6 @@ const claudeSetup: RuntimeSetup = {
 
 const codexSetup: RuntimeSetup = {
   prepareHome(ctx) {
-    // Transitional behavior: only provision a runtime-specific home when the
-    // compatibility file backend has actual material to write. Env-only auth
-    // keeps the existing minimal /home/node mount.
     const material = prepareProviderAuthSync(ctx);
     const authValidation = validateProviderAuthSync(ctx);
     if (authValidation.warnings) {
@@ -142,16 +139,14 @@ const codexSetup: RuntimeSetup = {
       }
     }
 
-    if (!material.files || material.files.length === 0) {
-      return createMinimalHome(ctx);
-    }
-
     const { homeDir, mount } = prepareHomeDir(
       ctx,
       '.codex',
       '/home/node/.codex',
     );
-    materializeAuthMaterial(homeDir, material);
+    if (material.files && material.files.length > 0) {
+      materializeAuthMaterial(homeDir, material);
+    }
 
     // TODO: Enforce sandboxProfile-aware launch policy in container-runner once
     // the runtime-specific security profiles are wired through container args.

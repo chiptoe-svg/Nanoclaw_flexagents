@@ -35,6 +35,16 @@ export class CodexRuntime implements AgentRuntime {
   private containerManager: ContainerManager | null = null;
   private groupFolder: string | null = null;
 
+  private toRuntimeOptions(
+    options: CodexResolvedOptions,
+  ): Record<string, unknown> {
+    return {
+      modelRef: options.modelRef,
+      sandboxProfile: options.sandboxProfile,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    };
+  }
+
   capabilities(): RuntimeCapabilities {
     return {
       supportsResume: true,
@@ -53,6 +63,7 @@ export class CodexRuntime implements AgentRuntime {
       config.group,
       config.runtimeOptions,
     );
+    const runtimeOptions = this.toRuntimeOptions(resolvedOptions);
     const warnings: string[] = [];
 
     if (config.runtimeOptions?.model && config.runtimeOptions?.modelRef) {
@@ -72,14 +83,14 @@ export class CodexRuntime implements AgentRuntime {
       runtime: this.id,
       groupSessionsBase: path.join(DATA_DIR, 'sessions', config.group.folder),
       projectRoot: process.cwd(),
-      runtimeOptions: resolvedOptions as Record<string, unknown>,
+      runtimeOptions,
     });
 
     if (authValidation.warnings) warnings.push(...authValidation.warnings);
 
     return {
       ok: authValidation.ok,
-      resolved: resolvedOptions as Record<string, unknown>,
+      resolved: runtimeOptions,
       warnings: warnings.length > 0 ? warnings : undefined,
       errors: authValidation.errors,
     };
@@ -92,7 +103,11 @@ export class CodexRuntime implements AgentRuntime {
     this.containerManager = config.containerManager;
     this.groupFolder = config.group.folder;
     const preflight = await this.preflight(config);
-    const resolvedOptions = (preflight.resolved || {}) as CodexResolvedOptions;
+    const resolvedOptions = resolveCodexRuntimeOptions(
+      config.group,
+      preflight.resolved || config.runtimeOptions,
+    );
+    const runtimeOptions = this.toRuntimeOptions(resolvedOptions);
 
     if (preflight.warnings) {
       for (const warning of preflight.warnings) {
@@ -122,7 +137,7 @@ export class CodexRuntime implements AgentRuntime {
         assistantName: config.assistantName,
         script: config.script,
         runtime: 'codex',
-        runtimeOptions: resolvedOptions as Record<string, unknown>,
+        runtimeOptions,
       },
       onProcess: (proc, containerName) =>
         config.onProcess(proc, containerName, config.group.folder),

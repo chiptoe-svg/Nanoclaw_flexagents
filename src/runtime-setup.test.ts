@@ -174,8 +174,8 @@ describe('runtime-setup', () => {
 
       const mount = setup.prepareHome(makeCtx({ runtime: 'codex' }));
 
-      expect(mount.hostPath).toBe('/data/sessions/test-group/home');
-      expect(mount.containerPath).toBe('/home/node');
+      expect(mount.hostPath).toBe('/data/sessions/test-group/.codex');
+      expect(mount.containerPath).toBe('/home/node/.codex');
       const codexWrites = fsMock.writeFileSync.mock.calls
         .filter((args) => String(args[0]).includes('/data/sessions/test-group/.codex/'));
       expect(codexWrites).toHaveLength(0);
