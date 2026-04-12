@@ -65,6 +65,45 @@ async function runCodexQuery(
     agentsParts.push(providerDocs);
   }
 
+  // Pre-inject skills into AGENTS.md to avoid Codex reading them via tool calls.
+  // Match the user's prompt against skill names/descriptions to inject the full
+  // SKILL.md for relevant skills. Include a summary index of all skills so the
+  // agent knows what's available without reading each file.
+  const skillsDir = path.join(process.env.HOME || '/home/node', '.codex', 'skills');
+  if (fs.existsSync(skillsDir)) {
+    const skillIndex: string[] = ['## Available Skills'];
+    const promptLower = containerInput.prompt.toLowerCase();
+
+    for (const entry of fs.readdirSync(skillsDir)) {
+      const skillMd = path.join(skillsDir, entry, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      const content = fs.readFileSync(skillMd, 'utf-8');
+      // Parse frontmatter name and description
+      const nameMatch = content.match(/^name:\s*(.+)$/m);
+      const descMatch = content.match(/^description:\s*(.+)$/m);
+      const name = nameMatch?.[1]?.trim() || entry;
+      const desc = descMatch?.[1]?.trim() || '';
+
+      skillIndex.push(`- **/${name}** — ${desc}`);
+
+      // Inject full content if the prompt references this skill
+      const triggers = [
+        `/${name}`,
+        `/${entry}`,
+        name.replace(/-/g, ' '),
+        entry.replace(/-/g, ' '),
+      ];
+      const isRelevant = triggers.some((t) => promptLower.includes(t.toLowerCase()));
+      if (isRelevant) {
+        agentsParts.push(`## Skill: /${name}\n\n${content}`);
+        log(`Pre-injected skill: ${name}`);
+      }
+    }
+
+    agentsParts.push(skillIndex.join('\n'));
+  }
+
   if (agentsParts.length > 0) {
     fs.writeFileSync(
       '/workspace/group/AGENTS.md',
