@@ -104,6 +104,78 @@ After auth, verify by checking the token file exists and ask the user for their 
 
 > What email address is this account for? (e.g., user@clemson.edu)
 
+#### MS365 Permission Discovery
+
+Before login, determine exactly which API permissions the Azure app has been granted. This drives the `--enabled-tools` regex — requesting scopes for tools the tenant hasn't approved will fail the entire login.
+
+**Ask the user to paste their granted permissions:**
+
+> I need to know which Microsoft Graph permissions your Azure app has been granted.
+>
+> **To find them:**
+> 1. Go to [Azure Portal → App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+> 2. Select your app (e.g., "GCassistant Office 365")
+> 3. Click **API permissions** in the left sidebar
+> 4. Copy/paste the permissions table — or just list the **Permission** and **Status** columns
+>
+> It looks something like:
+> ```
+> Permission              Type        Status
+> Calendars.ReadWrite     Delegated   Granted for Contoso
+> Mail.Read               Delegated   Granted for Contoso
+> Mail.ReadWrite          Delegated   Granted for Contoso
+> Mail.Send               Delegated   Not granted
+> Tasks.ReadWrite         Delegated   Granted for Contoso
+> User.Read               Delegated   Granted for Contoso
+> ```
+>
+> Paste whatever you see — I'll parse it.
+
+Use `AskUserQuestion` to collect the permissions list.
+
+**Parse the permissions and build the tool config:**
+
+From the pasted list, extract each permission name and its grant status. Map granted permissions to MS365 MCP tool capabilities:
+
+| Granted Permission | Enables |
+|---|---|
+| `Mail.Read` | list-mail-messages, get-mail-message, list-mail-folders, get-mail-folder |
+| `Mail.ReadWrite` | All Mail.Read tools + create-mail-folder, delete-mail-message, move-mail-message, update-mail-message, add-mail-attachment, create-draft-message |
+| `Mail.Send` | send-mail (NOT available without this) |
+| `Calendars.Read` | list-calendar-events, get-calendar-event, get-calendar-view, list-specific-calendar-events |
+| `Calendars.ReadWrite` | All Calendars.Read tools + create-calendar-event, update-calendar-event, delete-calendar-event, accept/decline/tentatively-accept |
+| `Tasks.Read` | list-todo-tasks, get-todo-task, list-todo-lists |
+| `Tasks.ReadWrite` | All Tasks.Read tools + create-todo-task, update-todo-task, delete-todo-task |
+| `Chat.Read` | list-chats, get-chat-message (Teams) |
+| `Contacts.Read` | list-contacts, get-contact |
+| `Files.Read` / `Files.ReadWrite` | list-files, get-file (OneDrive) |
+
+**Build the `--enabled-tools` regex** from only the granted permissions. The regex controls which tools the MCP server exposes, which in turn determines which OAuth scopes it requests. Example for Mail.Read + Mail.ReadWrite + Calendars.ReadWrite + Tasks.ReadWrite:
+
+```
+^(list-mail-(?!rule)|get-mail-(?!box)|create-mail-(?!rule)|delete-mail-(?!rule)|move-mail|update-mail-(?!rule)|add-mail|create-draft|list-calendar|get-calendar|create-calendar|update-calendar|delete-calendar|accept-calendar|decline-calendar|tentatively-accept|list-specific|get-specific|create-specific|update-specific|delete-specific|get-calendar-view|list-todo|get-todo|create-todo|update-todo|delete-todo|list-planner|get-planner|create-planner|update-planner|list-plan-tasks)
+```
+
+The negative lookaheads (`(?!rule)`, `(?!box)`) exclude mail-rules and mailbox-settings tools, which require scopes that most tenants don't grant.
+
+**Update `container/providers/ms365.json`** with the derived regex in both `mcp.args` and `auth.loginCommand`. Also update the `agentDocs` field to accurately describe what's available vs. not.
+
+**Report to the user:**
+
+> **MS365 Permissions configured:**
+>
+> ✓ Read email — `Mail.Read`
+> ✓ Write/move email — `Mail.ReadWrite`
+> ✗ Send email — `Mail.Send` (not granted by tenant)
+> ✓ Read/write calendar — `Calendars.ReadWrite`
+> ✓ Read/write tasks — `Tasks.ReadWrite`
+>
+> The `--enabled-tools` filter has been configured to match these permissions exactly.
+> Only tools backed by granted permissions will be exposed to the agent.
+>
+> **To add permissions later:** Request them in Azure Portal → API permissions,
+> get admin consent, then re-run `/add-email-account` to update the tool filter.
+
 #### Type: `imap` (Standard IMAP)
 
 Collect connection details via `AskUserQuestion`:
@@ -223,6 +295,8 @@ If the user chose "Test":
 > Which account to test?
 
 List accounts. Run the verification step (Step 4) for the selected account. Report success or failure.
+
+For `ms365` accounts, also read the `--enabled-tools` regex from `container/providers/ms365.json` and report which tool categories are enabled vs. excluded. If tools are failing, ask the user to re-check their Azure Portal API permissions and re-run the permission discovery step.
 
 ---
 

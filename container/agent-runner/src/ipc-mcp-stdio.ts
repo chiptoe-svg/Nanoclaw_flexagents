@@ -503,6 +503,174 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- Todo list tools ---
+// Simple file-backed todo list. Stored as JSON in the group folder.
+// Used by email triage and general agent tasks. Will be replaced by Apple Reminders (Phase 7).
+
+const TODO_FILE = path.join('/workspace/group', 'todos.json');
+
+interface TodoItem {
+  id: string;
+  title: string;
+  notes: string | null;
+  due: string | null;
+  priority: 'high' | 'medium' | 'low';
+  list: string;
+  completed: boolean;
+  created: string;
+  completed_at: string | null;
+}
+
+function readTodos(): TodoItem[] {
+  try {
+    if (fs.existsSync(TODO_FILE)) {
+      return JSON.parse(fs.readFileSync(TODO_FILE, 'utf-8'));
+    }
+  } catch { /* ignore parse errors */ }
+  return [];
+}
+
+function writeTodos(todos: TodoItem[]): void {
+  fs.writeFileSync(TODO_FILE, JSON.stringify(todos, null, 2));
+}
+
+server.tool(
+  'todo_create',
+  'Create a todo item. Use for email action items, reminders, or any task to track. Returns the new item ID.',
+  {
+    title: z.string().describe('Short action description (e.g., "Reply to Dr. Smith re: budget meeting")'),
+    notes: z.string().optional().describe('Additional context — for email todos, include email ID, account, sender, subject, proposed folder as JSON'),
+    due: z.string().optional().describe('Due date in ISO format (e.g., "2026-04-16T17:00:00"). Omit for no deadline.'),
+    priority: z.enum(['high', 'medium', 'low']).default('medium').describe('Priority level'),
+    list: z.string().default('General').describe('List name (e.g., "Email Actions", "General")'),
+  },
+  async (args) => {
+    const todos = readTodos();
+    const item: TodoItem = {
+      id: `todo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: args.title,
+      notes: args.notes || null,
+      due: args.due || null,
+      priority: args.priority,
+      list: args.list,
+      completed: false,
+      created: new Date().toISOString(),
+      completed_at: null,
+    };
+    todos.push(item);
+    writeTodos(todos);
+    return { content: [{ type: 'text' as const, text: `Created: ${item.id} — "${item.title}"` }] };
+  },
+);
+
+server.tool(
+  'todo_list',
+  'List todo items. Filter by list, status, or get everything.',
+  {
+    list: z.string().optional().describe('Filter by list name (e.g., "Email Actions"). Omit for all lists.'),
+    status: z.enum(['pending', 'completed', 'all']).default('pending').describe('Filter by status'),
+    include_notes: z.boolean().default(false).describe('Include notes field in output'),
+  },
+  async (args) => {
+    let todos = readTodos();
+    if (args.list) {
+      todos = todos.filter(t => t.list === args.list);
+    }
+    if (args.status === 'pending') {
+      todos = todos.filter(t => !t.completed);
+    } else if (args.status === 'completed') {
+      todos = todos.filter(t => t.completed);
+    }
+
+    if (todos.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No items found.' }] };
+    }
+
+    // Sort: overdue first, then by due date, then by priority
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const now = new Date().toISOString();
+    todos.sort((a, b) => {
+      // Overdue items first
+      const aOverdue = a.due && a.due < now && !a.completed ? 0 : 1;
+      const bOverdue = b.due && b.due < now && !b.completed ? 0 : 1;
+      if (aOverdue !== bOverdue) return aOverdue - bOverdue;
+      // Then by due date (earliest first, null last)
+      if (a.due && b.due) return a.due.localeCompare(b.due);
+      if (a.due) return -1;
+      if (b.due) return 1;
+      // Then by priority
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
+
+    const lines = todos.map(t => {
+      const check = t.completed ? '[x]' : '[ ]';
+      const overdue = t.due && t.due < now && !t.completed ? ' ⚠️ OVERDUE' : '';
+      const due = t.due ? ` (due ${t.due.slice(0, 10)})` : '';
+      const pri = t.priority !== 'medium' ? ` [${t.priority}]` : '';
+      let line = `${check} ${t.id}: ${t.title}${due}${pri}${overdue}`;
+      if (args.include_notes && t.notes) {
+        line += `\n    Notes: ${t.notes}`;
+      }
+      return line;
+    });
+
+    // Group by list
+    const lists = new Map<string, string[]>();
+    todos.forEach((t, i) => {
+      const group = lists.get(t.list) || [];
+      group.push(lines[i]);
+      lists.set(t.list, group);
+    });
+
+    let output = '';
+    for (const [listName, items] of lists) {
+      output += `**${listName}** (${items.length})\n${items.join('\n')}\n\n`;
+    }
+
+    return { content: [{ type: 'text' as const, text: output.trim() }] };
+  },
+);
+
+server.tool(
+  'todo_complete',
+  'Mark a todo item as completed. For email todos, this signals that the action is done and the email can be filed.',
+  {
+    id: z.string().describe('The todo item ID'),
+  },
+  async (args) => {
+    const todos = readTodos();
+    const item = todos.find(t => t.id === args.id);
+    if (!item) {
+      return { content: [{ type: 'text' as const, text: `Not found: ${args.id}` }], isError: true };
+    }
+    if (item.completed) {
+      return { content: [{ type: 'text' as const, text: `Already completed: "${item.title}"` }] };
+    }
+    item.completed = true;
+    item.completed_at = new Date().toISOString();
+    writeTodos(todos);
+    return { content: [{ type: 'text' as const, text: `Completed: "${item.title}"` }] };
+  },
+);
+
+server.tool(
+  'todo_delete',
+  'Delete a todo item permanently.',
+  {
+    id: z.string().describe('The todo item ID'),
+  },
+  async (args) => {
+    const todos = readTodos();
+    const idx = todos.findIndex(t => t.id === args.id);
+    if (idx === -1) {
+      return { content: [{ type: 'text' as const, text: `Not found: ${args.id}` }], isError: true };
+    }
+    const removed = todos.splice(idx, 1)[0];
+    writeTodos(todos);
+    return { content: [{ type: 'text' as const, text: `Deleted: "${removed.title}"` }] };
+  },
+);
+
 // --- File operation tools ---
 // These provide Claude-like file tools (Read, Write, Edit, Glob, Grep) as MCP tools.
 // Codex SDK only has bash — these eliminate API round-trips for file operations.
