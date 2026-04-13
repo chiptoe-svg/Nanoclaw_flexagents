@@ -96,29 +96,21 @@ async function runCodexQuery(
   const configOverrides = createCodexConfigOverrides(baseUrl);
 
   // Build MCP server configs and write config.toml
-  // The app-server reads config.toml for MCP server definitions.
-  // We write a minimal file with just MCP config — everything else
-  // goes via -c flags to avoid the config.toml corruption bugs.
   const mcpServers = buildCodexMcpConfig(mcpServerPath, containerInput, modelRef);
   writeCodexMcpConfigToml(mcpServers);
 
   // Spawn the app-server
   const server = spawnCodexAppServer(configOverrides);
-
-  // Wire up auto-approval
   attachCodexAutoApproval(server);
 
   let newThreadId: string | undefined;
   let closedDuringQuery = false;
 
   try {
-    // Step 1: Initialize
     await initializeCodexAppServer(server);
 
-    // Step 2: Start or resume thread
     // Pass AGENTS.md content explicitly via baseInstructions.
-    // The app-server CLI reads AGENTS.md from cwd, but the JSON-RPC
-    // protocol may not — baseInstructions ensures the persona is injected.
+    // The JSON-RPC protocol does not auto-read AGENTS.md from cwd.
     const agentsMdContent = fs.existsSync('/workspace/group/AGENTS.md')
       ? fs.readFileSync('/workspace/group/AGENTS.md', 'utf-8')
       : undefined;
@@ -132,17 +124,10 @@ async function runCodexQuery(
       baseInstructions: agentsMdContent,
     };
 
-    let threadId: string | undefined;
-
-    threadId = await startOrResumeCodexThread(server, sessionId, threadParams);
-
+    const threadId = await startOrResumeCodexThread(server, sessionId, threadParams);
     newThreadId = threadId;
 
-    // Step 3: Send the turn
-    log('Starting turn...');
-
-    // Collect streaming output — mutable state shared with notification handlers.
-    // Using an object so TypeScript doesn't narrow closure-captured vars to `never`.
+    // Collect streaming output
     const turnState = {
       resultText: '',
       toolCalls: [] as string[],
@@ -150,13 +135,12 @@ async function runCodexQuery(
       totalInputTokens: 0,
     };
 
-    // Set up notification handlers for this turn
     const turnPromise = new Promise<void>((resolve, reject) => {
       const turnTimeout = setTimeout(() => {
         reject(new Error(`Turn timed out after ${TURN_TIMEOUT_MS}ms`));
       }, TURN_TIMEOUT_MS);
 
-      server.notificationHandlers.push((notification) => {
+      server.notificationHandlers.push((notification: JsonRpcNotification) => {
         const method = notification.method;
         const params = notification.params;
 
@@ -179,7 +163,6 @@ async function runCodexQuery(
           case 'item/started': {
             const item = params.item as { type?: string; command?: string; server?: string; tool?: string; query?: string; changes?: { path: string }[] } | undefined;
             if (!item) break;
-
             if (item.type === 'commandExecution' && item.command) {
               log(`[tool] Running: ${item.command}`);
               turnState.toolCalls.push(`$ ${item.command}`);
@@ -202,7 +185,6 @@ async function runCodexQuery(
             if (item?.type === 'commandExecution' && item.aggregated_output) {
               turnState.toolCalls.push(item.aggregated_output.slice(0, 500));
             }
-            // Capture final message text from completed agentMessage items
             if (item?.type === 'agentMessage' && item.text) {
               turnState.resultText = item.text;
             }
@@ -210,11 +192,9 @@ async function runCodexQuery(
           }
 
           case 'item/commandExecution/outputDelta':
-            // Streaming command output — log but don't append to result
             break;
 
           case 'thread/tokenUsage/updated': {
-            // Server tracks cumulative totals — use directly for compaction decisions
             const usage = params.tokenUsage as { total?: { inputTokens?: number; outputTokens?: number } } | undefined;
             if (usage?.total) {
               turnState.totalInputTokens = usage.total.inputTokens || 0;
@@ -231,27 +211,22 @@ async function runCodexQuery(
             log('Turn started');
             break;
 
-          case 'turn/completed': {
+          case 'turn/completed':
             turnState.turnComplete = true;
             clearTimeout(turnTimeout);
             resolve();
             break;
-          }
 
-          case 'thread/status/changed': {
-            const status = params.status as string | undefined;
-            log(`Thread status: ${status}`);
+          case 'thread/status/changed':
+            log(`Thread status: ${params.status}`);
             break;
-          }
 
-          // Ignore noisy notifications
           case 'item/reasoning/summaryTextDelta':
           case 'turn/diff/updated':
           case 'turn/plan/updated':
             break;
 
           default:
-            // Log unknown notifications for debugging
             if (!method.startsWith('item/')) {
               log(`[notification] ${method}`);
             }
@@ -260,7 +235,6 @@ async function runCodexQuery(
       });
     });
 
-    // Send turn/start
     await startCodexTurn(server, {
       threadId,
       inputText: prompt,
@@ -281,14 +255,12 @@ async function runCodexQuery(
     };
     setTimeout(pollIpc, 500);
 
-    // Wait for turn completion
     await turnPromise;
     ipcPolling = false;
 
     log(`Turn complete. Result: ${turnState.resultText.length} chars, ${turnState.toolCalls.length} tool calls`);
 
-    // Trigger native compaction if cumulative tokens exceed threshold.
-    // The server tracks totals via thread/tokenUsage/updated — no local state file needed.
+    // Trigger native compaction if cumulative tokens exceed threshold
     if (turnState.totalInputTokens >= COMPACT_THRESHOLD) {
       log(`Compaction threshold reached (${turnState.totalInputTokens}/${COMPACT_THRESHOLD} tokens). Compacting...`);
       const compactResp = await sendCodexRequest(server, 'thread/compact/start', {
@@ -309,7 +281,6 @@ async function runCodexQuery(
       log(`Processing ${pendingMessages.length} IPC message(s) that arrived during turn`);
       const followUp = pendingMessages.join('\n');
 
-      // Reset streaming state for follow-up
       turnState.resultText = '';
       turnState.turnComplete = false;
 
@@ -321,24 +292,18 @@ async function runCodexQuery(
         setTimeout(checkComplete, 100);
       });
 
-      let followUpError: string | undefined;
       try {
         await startCodexTurn(server, {
           threadId: newThreadId,
           inputText: followUp,
           model: modelRef,
         });
-      } catch (err) {
-        followUpError = err instanceof Error ? err.message : String(err);
-      }
-
-      if (!followUpError) {
         await followUpTurnPromise;
         if (turnState.resultText) {
           writeOutput({ status: 'success', result: turnState.resultText, newSessionId: newThreadId });
         }
-      } else {
-        log(`Follow-up turn failed: ${followUpError}`);
+      } catch (err) {
+        log(`Follow-up turn failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   } catch (err) {
