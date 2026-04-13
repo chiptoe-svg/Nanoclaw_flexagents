@@ -75,7 +75,7 @@ function prepareCompatibilityEnv(ctx: AuthContext): AuthMaterial {
   };
 }
 
-function validateCompatibilityEnv(ctx: AuthContext): AuthValidationResult {
+function validateCompatibilityEnv(_ctx: AuthContext): AuthValidationResult {
   const hasLegacyAuth = fs.existsSync(getLegacyCodexAuthPath());
   if (hasLegacyAuth) {
     return { ok: true };
