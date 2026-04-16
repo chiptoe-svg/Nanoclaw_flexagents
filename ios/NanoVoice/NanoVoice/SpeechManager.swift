@@ -8,15 +8,31 @@ class SpeechManager: NSObject, ObservableObject {
     @Published var transcribedText = ""
     @Published var authorizationStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
 
+    /// When true, auto-sends after a natural pause in speech.
+    @Published var autoSend = false {
+        didSet { UserDefaults.standard.set(autoSend, forKey: "autoSend") }
+    }
+
+    /// Called when silence is detected and autoSend is on.
+    var onAutoSend: (() -> Void)?
+
+    /// How long to wait after the last speech before auto-sending (seconds).
+    var silenceThreshold: TimeInterval = 1.8
+
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private let synthesizer = AVSpeechSynthesizer()
 
+    private var silenceTimer: Timer?
+    private var lastTranscriptionTime: Date?
+    private var hasReceivedSpeech = false
+
     override init() {
         super.init()
         synthesizer.delegate = self
+        autoSend = UserDefaults.standard.bool(forKey: "autoSend")
         requestAuthorization()
     }
 
@@ -40,6 +56,8 @@ class SpeechManager: NSObject, ObservableObject {
         }
 
         transcribedText = ""
+        hasReceivedSpeech = false
+        lastTranscriptionTime = nil
 
         let audioSession = AVAudioSession.sharedInstance()
         do {
@@ -58,8 +76,20 @@ class SpeechManager: NSObject, ObservableObject {
             guard let self else { return }
 
             if let result {
+                let text = result.bestTranscription.formattedString
                 DispatchQueue.main.async {
-                    self.transcribedText = result.bestTranscription.formattedString
+                    self.transcribedText = text
+                    self.hasReceivedSpeech = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    self.lastTranscriptionTime = Date()
+                    self.resetSilenceTimer()
+                }
+
+                // If the recognizer signals final (it detected a natural end), auto-send
+                if result.isFinal && self.autoSend && self.hasReceivedSpeech {
+                    DispatchQueue.main.async {
+                        self.triggerAutoSend()
+                    }
+                    return
                 }
             }
 
@@ -79,6 +109,9 @@ class SpeechManager: NSObject, ObservableObject {
             try audioEngine.start()
             DispatchQueue.main.async {
                 self.isListening = true
+                if self.autoSend {
+                    self.startSilenceTimer()
+                }
             }
         } catch {
             print("Audio engine start failed: \(error)")
@@ -87,6 +120,7 @@ class SpeechManager: NSObject, ObservableObject {
 
     func stopListening() {
         guard isListening else { return }
+        cancelSilenceTimer()
         stopListeningInternal()
     }
 
@@ -96,10 +130,46 @@ class SpeechManager: NSObject, ObservableObject {
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         recognitionTask = nil
+        cancelSilenceTimer()
 
         DispatchQueue.main.async {
             self.isListening = false
         }
+    }
+
+    // MARK: - Silence Detection
+
+    private func startSilenceTimer() {
+        cancelSilenceTimer()
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            self?.checkSilence()
+        }
+    }
+
+    private func cancelSilenceTimer() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+    }
+
+    private func resetSilenceTimer() {
+        // Timer keeps running, checkSilence uses lastTranscriptionTime
+    }
+
+    private func checkSilence() {
+        guard autoSend, isListening, hasReceivedSpeech else { return }
+        guard let lastTime = lastTranscriptionTime else { return }
+
+        let elapsed = Date().timeIntervalSince(lastTime)
+        if elapsed >= silenceThreshold {
+            triggerAutoSend()
+        }
+    }
+
+    private func triggerAutoSend() {
+        guard isListening, hasReceivedSpeech else { return }
+        cancelSilenceTimer()
+        stopListeningInternal()
+        onAutoSend?()
     }
 
     // MARK: - Text-to-Speech (TTS)

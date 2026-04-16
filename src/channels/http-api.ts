@@ -13,7 +13,12 @@ import http from 'http';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, type ChannelOpts } from './registry.js';
-import type { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import type {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const envSecrets = readEnvFile(['HTTP_API_KEY', 'HTTP_API_PORT']);
 const HTTP_API_PORT = parseInt(envSecrets.HTTP_API_PORT || '3100', 10);
@@ -39,7 +44,10 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
     // CORS headers for iOS app
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization',
+    );
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -67,7 +75,8 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
     }
 
     // Auth check
-    const apiKey = parsed.apiKey || req.headers.authorization?.replace('Bearer ', '');
+    const apiKey =
+      parsed.apiKey || req.headers.authorization?.replace('Bearer ', '');
     if (!apiKey || apiKey !== HTTP_API_KEY) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Invalid API key' }));
@@ -83,14 +92,19 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
 
     // Find the target group — default to main group
     const groups = registeredGroups();
-    const targetFolder = parsed.group || Object.values(groups).find(g => g.isMain)?.folder;
+    const targetFolder =
+      parsed.group || Object.values(groups).find((g) => g.isMain)?.folder;
     if (!targetFolder) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'No group found. Set "group" field or register a main group.' }));
+      res.end(
+        JSON.stringify({
+          error: 'No group found. Set "group" field or register a main group.',
+        }),
+      );
       return;
     }
 
-    const group = Object.values(groups).find(g => g.folder === targetFolder);
+    const group = Object.values(groups).find((g) => g.folder === targetFolder);
     if (!group) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Group "${targetFolder}" not found` }));
@@ -98,10 +112,16 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
     }
 
     // Find the actual JID for this group (e.g., "tg:8731035088")
-    const groupEntry = Object.entries(groups).find(([, g]) => g.folder === targetFolder);
+    const groupEntry = Object.entries(groups).find(
+      ([, g]) => g.folder === targetFolder,
+    );
     if (!groupEntry) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: `No registered JID for group "${targetFolder}"` }));
+      res.end(
+        JSON.stringify({
+          error: `No registered JID for group "${targetFolder}"`,
+        }),
+      );
       return;
     }
     const jid = groupEntry[0]; // The actual JID from the registered group
@@ -110,10 +130,13 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
 
     // Set up response promise with timeout
     const responsePromise = new Promise<string>((resolve) => {
-      const timer = setTimeout(() => {
-        pending.delete(jid);
-        resolve('(Request timed out — the agent took too long to respond.)');
-      }, 5 * 60 * 1000); // 5 minute timeout
+      const timer = setTimeout(
+        () => {
+          pending.delete(jid);
+          resolve('(Request timed out — the agent took too long to respond.)');
+        },
+        5 * 60 * 1000,
+      ); // 5 minute timeout
 
       pending.set(jid, { resolve, timer });
     });
@@ -129,7 +152,10 @@ function createHttpApiChannel(opts: ChannelOpts): Channel | null {
       is_from_me: false,
     };
 
-    logger.info({ requestId, jid, text: text.slice(0, 80) }, 'HTTP API message received');
+    logger.info(
+      { requestId, jid, text: text.slice(0, 80) },
+      'HTTP API message received',
+    );
 
     // Deliver the message (uses the real JID so it routes through the normal pipeline)
     onMessage(jid, message);

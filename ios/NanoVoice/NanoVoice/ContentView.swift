@@ -43,7 +43,11 @@ struct ContentView: View {
                     }
                     .onChange(of: messages.count) {
                         withAnimation {
-                            proxy.scrollTo(messages.last?.id ?? "loading", anchor: .bottom)
+                            if let lastMessageID = messages.last?.id {
+                                proxy.scrollTo(lastMessageID, anchor: .bottom)
+                            } else {
+                                proxy.scrollTo("loading", anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -74,14 +78,27 @@ struct ContentView: View {
 
                 // Controls
                 HStack(spacing: 20) {
-                    // Auto-speak toggle
-                    Button {
-                        autoSpeak.toggle()
-                    } label: {
-                        Image(systemName: autoSpeak ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.title3)
-                            .foregroundStyle(autoSpeak ? .blue : .secondary)
+                    // Left column: toggles
+                    VStack(spacing: 8) {
+                        // Auto-speak toggle
+                        Button {
+                            autoSpeak.toggle()
+                        } label: {
+                            Image(systemName: autoSpeak ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.callout)
+                                .foregroundStyle(autoSpeak ? .blue : .secondary)
+                        }
+
+                        // Auto-send toggle (sends on natural pause)
+                        Button {
+                            speech.autoSend.toggle()
+                        } label: {
+                            Image(systemName: speech.autoSend ? "hand.raised.slash.fill" : "hand.raised.fill")
+                                .font(.callout)
+                                .foregroundStyle(speech.autoSend ? .green : .secondary)
+                        }
                     }
+                    .frame(width: 36)
 
                     Spacer()
 
@@ -121,27 +138,73 @@ struct ContentView: View {
                             .foregroundStyle(speech.isSpeaking ? .red : .secondary)
                     }
                     .disabled(!speech.isSpeaking)
+                    .frame(width: 36)
                 }
                 .padding()
                 .background(.ultraThinMaterial)
+
+                // Mode indicator
+                if speech.autoSend {
+                    Text("Hands-free: sends automatically after you pause")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .padding(.bottom, 4)
+                }
             }
-            .navigationTitle("NanoVoice")
+            .navigationTitle(client.activeServer?.name ?? "NanoVoice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gear")
+                ToolbarItem(placement: .topBarLeading) {
+                    // Server picker — tap to switch between instances
+                    if client.servers.count > 1 {
+                        Menu {
+                            ForEach(client.servers) { server in
+                                Button {
+                                    client.setActive(server)
+                                    messages.removeAll()
+                                } label: {
+                                    HStack {
+                                        Text(server.name)
+                                        if server.id == client.activeServerID {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "server.rack")
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2)
+                            }
+                        }
+                    } else {
+                        Button {
+                            messages.removeAll()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(messages.isEmpty)
                     }
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        messages.removeAll()
-                    } label: {
-                        Image(systemName: "trash")
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        if client.servers.count > 1 {
+                            Button {
+                                messages.removeAll()
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .disabled(messages.isEmpty)
+                        }
+
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gear")
+                        }
                     }
-                    .disabled(messages.isEmpty)
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -150,6 +213,9 @@ struct ContentView: View {
             .onAppear {
                 if !client.isConfigured {
                     showSettings = true
+                }
+                speech.onAutoSend = { [self] in
+                    sendTranscribedText()
                 }
             }
         }
@@ -189,6 +255,8 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Message Bubble
+
 struct MessageBubble: View {
     let message: Message
 
@@ -207,43 +275,65 @@ struct MessageBubble: View {
     }
 }
 
+// MARK: - Settings
+
 struct SettingsView: View {
     @ObservedObject var client: NanoClawClient
     @Environment(\.dismiss) private var dismiss
-    @State private var serverURL: String = ""
-    @State private var apiKey: String = ""
+    @State private var editingServer: ServerInstance?
+    @State private var showAddSheet = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("NanoClaw Server") {
-                    TextField("Server URL", text: $serverURL)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                        .keyboardType(.URL)
+            List {
+                Section("Servers") {
+                    ForEach(client.servers) { server in
+                        Button {
+                            client.setActive(server)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(server.name)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text(server.url)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
 
-                    SecureField("API Key", text: $apiKey)
-                        .autocapitalization(.none)
-                }
+                                Spacer()
 
-                Section {
-                    Button("Test Connection") {
-                        Task {
-                            client.serverURL = serverURL
-                            client.apiKey = apiKey
-                            do {
-                                let response = try await client.sendMessage("ping")
-                                // Success — save and dismiss
-                                dismiss()
-                            } catch {
-                                // Show error but still save
+                                if server.id == client.activeServerID {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                }
                             }
                         }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                client.deleteServer(server)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+
+                            Button {
+                                editingServer = server
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.orange)
+                        }
+                    }
+
+                    Button {
+                        showAddSheet = true
+                    } label: {
+                        Label("Add Server", systemImage: "plus.circle")
                     }
                 }
 
                 Section("About") {
-                    Text("NanoVoice connects to your NanoClaw agent via the HTTP API channel. Set the server URL and API key from your .env file.")
+                    Text("NanoVoice connects to NanoClaw agents via the HTTP API channel. Each server needs a URL and API key from the server's .env file (HTTP_API_KEY).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -252,16 +342,121 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        client.serverURL = serverURL
-                        client.apiKey = apiKey
-                        dismiss()
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showAddSheet) {
+                ServerEditView(client: client, server: ServerInstance())
+            }
+            .sheet(item: $editingServer) { server in
+                ServerEditView(client: client, server: server, isEditing: true)
+            }
+        }
+    }
+}
+
+// MARK: - Server Edit
+
+struct ServerEditView: View {
+    @ObservedObject var client: NanoClawClient
+    @Environment(\.dismiss) private var dismiss
+    @State var server: ServerInstance
+    var isEditing = false
+    @State private var testResult: String?
+    @State private var isTesting = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Server Details") {
+                    TextField("Name (e.g., Home, Office, Lab)", text: $server.name)
+                        .autocapitalization(.words)
+
+                    TextField("URL (e.g., http://192.168.1.50:3100)", text: $server.url)
+                        .textContentType(.URL)
+                        .autocapitalization(.none)
+                        .keyboardType(.URL)
+
+                    SecureField("API Key", text: $server.apiKey)
+                        .autocapitalization(.none)
+                }
+
+                Section {
+                    Button {
+                        testConnection()
+                    } label: {
+                        HStack {
+                            Text("Test Connection")
+                            Spacer()
+                            if isTesting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else if let result = testResult {
+                                Image(systemName: result == "ok" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result == "ok" ? .green : .red)
+                            }
+                        }
+                    }
+                    .disabled(server.url.isEmpty || server.apiKey.isEmpty || isTesting)
+
+                    if let result = testResult, result != "ok" {
+                        Text(result)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
             }
-            .onAppear {
-                serverURL = client.serverURL
-                apiKey = client.apiKey
+            .navigationTitle(isEditing ? "Edit Server" : "Add Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        if server.name.isEmpty {
+                            server.name = "Server"
+                        }
+                        if isEditing {
+                            client.updateServer(server)
+                        } else {
+                            client.addServer(server)
+                        }
+                        dismiss()
+                    }
+                    .disabled(server.url.isEmpty || server.apiKey.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func testConnection() {
+        isTesting = true
+        testResult = nil
+
+        Task {
+            do {
+                let url = URL(string: "\(server.url)/api/message")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.timeoutInterval = 30
+
+                let body: [String: String] = ["text": "ping", "apiKey": server.apiKey]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+                await MainActor.run {
+                    isTesting = false
+                    testResult = statusCode == 200 ? "ok" : "HTTP \(statusCode)"
+                }
+            } catch {
+                await MainActor.run {
+                    isTesting = false
+                    testResult = error.localizedDescription
+                }
             }
         }
     }
