@@ -22,7 +22,10 @@ import {
   writeOutput,
 } from '../shared.js';
 // Provider docs are loaded via skills, not globally
+import { getProviderMcpConfigs } from '../provider-registry.js';
 import { registerContainerRuntime, type QueryResult } from '../runtime-registry.js';
+
+const PROVIDER_MCP_CONFIG_PATH = '/tmp/nanoclaw-provider-mcp.json';
 
 // --- ADK server management ---
 
@@ -45,10 +48,19 @@ async function startAdkServer(containerInput: ContainerInput, mcpServerPath: str
   const model = getContainerModel(containerInput, 'gemini-2.5-flash');
   log(`Starting ADK server on port ${ADK_PORT} (model: ${model})`);
 
+  // Resolve provider MCP configs (gws_mcp, ms365, etc.) on the Node side and
+  // hand them to the ADK agent via a JSON file. Keeps glob/${env.VAR}/${tokenDir}
+  // resolution in one place (the TS provider-registry) rather than duplicating
+  // it in Python.
+  const providerMcp = getProviderMcpConfigs();
+  fs.writeFileSync(PROVIDER_MCP_CONFIG_PATH, JSON.stringify(providerMcp, null, 2));
+  log(`Wrote ${Object.keys(providerMcp).length} provider MCP config(s) for ADK`);
+
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     NANOCLAW_MODEL: model,
     NANOCLAW_MCP_SERVER: mcpServerPath,
+    NANOCLAW_PROVIDER_MCP_CONFIG: PROVIDER_MCP_CONFIG_PATH,
     NANOCLAW_CHAT_JID: containerInput.chatJid,
     NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
     NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',

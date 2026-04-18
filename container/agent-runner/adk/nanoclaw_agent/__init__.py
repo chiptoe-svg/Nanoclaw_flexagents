@@ -6,8 +6,10 @@ configures MCP tools (nanoclaw IPC), and exposes specialist
 sub-agents from the Specialists section of the persona.
 """
 
+import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
@@ -17,6 +19,7 @@ from google.adk.tools.mcp_tool import McpToolset, StdioConnectionParams
 
 MODEL = os.environ.get("NANOCLAW_MODEL", "gemini-2.5-flash")
 MCP_SERVER_PATH = os.environ.get("NANOCLAW_MCP_SERVER", "")
+PROVIDER_MCP_CONFIG = os.environ.get("NANOCLAW_PROVIDER_MCP_CONFIG", "")
 CHAT_JID = os.environ.get("NANOCLAW_CHAT_JID", "")
 GROUP_FOLDER = os.environ.get("NANOCLAW_GROUP_FOLDER", "")
 IS_MAIN = os.environ.get("NANOCLAW_IS_MAIN", "0")
@@ -74,8 +77,49 @@ def parse_specialists(persona: str) -> list[LlmAgent]:
 
 # --- Build tools ---
 
+def build_provider_toolsets() -> list:
+    """Register an McpToolset per provider whose tokens are present.
+
+    The Node-side provider-registry resolves globs, ${tokenDir}, and
+    ${env.VAR} placeholders and writes the final command/args/env for each
+    available provider to NANOCLAW_PROVIDER_MCP_CONFIG. We just load and
+    spawn.
+    """
+    toolsets = []
+    if not PROVIDER_MCP_CONFIG:
+        return toolsets
+    try:
+        with open(PROVIDER_MCP_CONFIG) as f:
+            configs = json.load(f)
+    except (OSError, json.JSONDecodeError) as err:
+        print(
+            f"[nanoclaw_agent] failed to read provider MCP config: {err}",
+            file=sys.stderr,
+        )
+        return toolsets
+
+    for provider_id, cfg in configs.items():
+        command = cfg.get("command")
+        args = cfg.get("args", [])
+        env = cfg.get("env", {})
+        if not command:
+            continue
+        toolsets.append(
+            McpToolset(
+                connection_params=StdioConnectionParams(
+                    command=command,
+                    args=args,
+                    env=env,
+                ),
+            )
+        )
+        print(f"[nanoclaw_agent] registered provider MCP: {provider_id}", file=sys.stderr)
+
+    return toolsets
+
+
 def build_tools() -> list:
-    """Configure MCP tools for the NanoClaw IPC server."""
+    """Configure MCP tools for the NanoClaw IPC server + providers."""
     tools = []
     if MCP_SERVER_PATH:
         tools.append(
@@ -93,6 +137,7 @@ def build_tools() -> list:
                 ),
             )
         )
+    tools.extend(build_provider_toolsets())
     return tools
 
 
