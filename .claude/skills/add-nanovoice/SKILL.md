@@ -39,26 +39,27 @@ The NanoVoice code lives on the `nanovoice-skill` branch of this repo. Merging t
 
 ### Merge the skill branch
 
-If `nanovoice-skill` is still a local branch (default — you haven't published it yet):
+The skill branch ships with this fork under `origin/nanovoice-skill`. Merge it into `main`:
 
 ```bash
 git checkout main
-git merge nanovoice-skill || {
+git fetch origin
+git merge origin/nanovoice-skill || {
   git checkout --theirs package-lock.json 2>/dev/null
   git add package-lock.json 2>/dev/null
   git merge --continue
 }
 ```
 
-If you've published `nanovoice-skill` to a separate repo (recommended once it stabilises — e.g. `git@github.com:<you>/nanoclaw-nanovoice.git`), add a remote and merge from that instead:
+If the merge reports conflicts, read the conflicted files and understand the intent of both sides before resolving.
+
+If this skill is ever extracted to a standalone repo (e.g. `clemson-cs/nanoclaw-nanovoice`), add it as a remote and merge from there instead:
 
 ```bash
-git remote add nanovoice <url-of-published-repo>
+git remote add nanovoice <url-of-standalone-repo>
 git fetch nanovoice main
 git merge nanovoice/main
 ```
-
-If the merge reports conflicts, read the conflicted files and understand the intent of both sides before resolving.
 
 ### Validate code changes
 
