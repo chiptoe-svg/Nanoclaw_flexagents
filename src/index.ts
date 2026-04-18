@@ -69,6 +69,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { startMs365Reconciler } from './ms365-reconciler.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -836,6 +837,30 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+
+  // MS365 To-Do reconciliation: when the user tap-completes a task on
+  // Outlook / Microsoft To Do / iOS Reminders (Exchange list), this picks
+  // it up and enqueues a filing task. Self-disables when MS365 isn't set up.
+  startMs365Reconciler({
+    registeredGroups: () => registeredGroups,
+    onTaskCreated: () => {
+      const tasks = getAllTasks();
+      const taskRows = tasks.map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        prompt: t.prompt,
+        script: t.script || undefined,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      }));
+      for (const group of Object.values(registeredGroups)) {
+        writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+      }
+    },
+  });
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
