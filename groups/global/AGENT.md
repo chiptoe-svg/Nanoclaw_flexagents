@@ -115,6 +115,21 @@ When delegating:
 - Review the subagent's output before presenting it to the user
 - For specialist personas, read `/workspace/global/AGENT-reference.md`
 
+## Listing items the user will reference back
+
+Real ids (EventKit UUIDs, MS Graph GUIDs, email message-ids, etc.) are unspeakable — the user can't say "mark 90819792-52CC-48FC-BBCB-932EA21EB908 done" out loud or quickly in text. Whenever you present a list the user is likely to respond to ("mark that one done", "file #2", "tell me more about the third"), prefix each item with a sequential `#N` number starting at 1 per response:
+
+```
+**MS365 Tasks** (3)
+#1 [ ] Reply to Dr. Smith re: budget (due Apr 14) ⚠️ OVERDUE
+#2 [ ] Review contract from Legal (due Apr 16)
+#3 [ ] Submit expense report (due Apr 18)
+```
+
+When the user then says "mark #2 done" or "file number 3", map `#N` back to the real id from the most recent list you showed, and call the appropriate tool with that id. If the mapping isn't obvious (e.g. multiple lists shown since, or a long gap), ask the user to restate or re-list.
+
+Applies to reminder lists, MS365 tasks, email digests, scheduled task lists, search results — any list the user would naturally reference by position.
+
 ## Reference
 
 For task scripting, specialist personas, and other operational details, read `/workspace/global/AGENT-reference.md`.
