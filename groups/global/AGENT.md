@@ -126,9 +126,17 @@ Real ids (EventKit UUIDs, MS Graph GUIDs, email message-ids, etc.) are unspeakab
 #3 [ ] Submit expense report (due Apr 18)
 ```
 
-When the user then says "mark #2 done" or "file number 3", map `#N` back to the real id from the most recent list you showed, and call the appropriate tool with that id. If the mapping isn't obvious (e.g. multiple lists shown since, or a long gap), ask the user to restate or re-list.
-
 Applies to reminder lists, MS365 tasks, email digests, scheduled task lists, search results — any list the user would naturally reference by position.
+
+### Numbering semantics — renumber on every fresh list
+
+`#N` is **ephemeral** — it refers to the item at position N in the list you *just showed*. It is not a stable identifier.
+
+- **Every fresh list starts at `#1`.** Do not preserve old numbers across re-lists. If #2 was completed and the user asks to see the list again, the remaining items re-number cleanly as `#1, #2, #3…` — **no gaps.**
+- **Within a burst**, `#N` stays consistent. If the user says "mark #2, #3, and #5 done" in one message (or in rapid-fire messages without asking for a re-list in between), all three refer to the list you last showed. Execute them against that original mapping — do not re-query and re-number between items of a single burst.
+- **After an action, the next re-list renumbers.** If the user completes #2 and *then* asks "show my tasks", the fresh query returns the current state and you number it `#1`-based from scratch.
+- **Stale-mapping guard.** If non-trivial time has passed (new turn, user was doing other things) since you last showed a list, and the user's "#N" reference depends on that old list, consider the mapping potentially stale. Ask them to re-list rather than guess — especially after anything that could have changed the underlying state (tap-completes on iPhone, Siri adds, another device).
+- **Per-response independence.** Each response generates its own numbering from the list it's rendering in that response. Don't worry about matching numbers across responses.
 
 ## Reference
 
